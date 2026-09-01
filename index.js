@@ -1089,7 +1089,7 @@ bot.on('message', async (msg) => {
   const text = msg.text.trim();
   const user = await registerUser(msg.from);
 
-  // PRIORITY 1: Check if message is a standard Reply Keyboard button or a Category Number
+  // PRIORITY 1: Check if message is a standard Reply Keyboard button
   const MENU_KEYWORDS = [
     'Katalog', 'List Produk', 'Order OTP', 'Cek Saldo', 'Saldo', 'Deposit', 'Riwayat Transaksi',
     'Cari Produk', 'Klaim Voucher', 'Klaim Garansi', 'BANTUAN', 'Bantuan', 'Populer',
@@ -1098,16 +1098,16 @@ bot.on('message', async (msg) => {
     'Statistik & Export', 'Status CodeGatra', 'Broadcast'
   ];
 
-  const isMenuAction = MENU_KEYWORDS.some(k => text.includes(k)) || /^\d+$/.test(text);
+  const isMenuButtonClick = MENU_KEYWORDS.some(k => text.includes(k));
 
-  if (isMenuAction) {
-    // Immediately clear conversational state so user is NEVER trapped
+  if (isMenuButtonClick) {
+    // Immediately clear conversational state so user is NEVER trapped when clicking menu buttons
     delete userStates[chatId];
   }
 
-  // PRIORITY 2: Handle Active Conversational States (if NOT a menu button)
+  // PRIORITY 2: Handle Active Conversational States (if NOT clicking a menu button)
   const state = userStates[chatId];
-  if (state && !isMenuAction) {
+  if (state && !isMenuButtonClick) {
     if (state.step === 'AWAITING_SEARCH_KEYWORD') {
       delete userStates[chatId];
       return searchProducts(chatId, text, null);
