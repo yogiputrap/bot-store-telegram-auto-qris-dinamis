@@ -419,6 +419,8 @@ async function registerUser(from) {
 async function renderCatalog(chatId, page = 1, messageId = null) {
   const query = `
     SELECT p.category,
+           MIN(p.price) as min_price,
+           MAX(p.price) as max_price,
            COUNT(DISTINCT p.id) as var_count,
            COUNT(s.id) as total_stock
     FROM products p
@@ -430,32 +432,57 @@ async function renderCatalog(chatId, page = 1, messageId = null) {
 
   const categories = await dbAll(query);
   const totalCategories = categories.length;
-  const itemsPerPage = config.ITEMS_PER_PAGE || 10;
+  const itemsPerPage = config.ITEMS_PER_PAGE || 6;
   const totalPages = Math.ceil(totalCategories / itemsPerPage) || 1;
   const currentPage = Math.max(1, Math.min(page, totalPages));
 
   const startIndex = (currentPage - 1) * itemsPerPage;
   const pageCategories = categories.slice(startIndex, startIndex + itemsPerPage);
 
-  let caption = `<blockquote><b>LIST PRODUK ${config.STORE_NAME || 'JEPZ STORE'}</b>\n---------------------------------\n`;
+  let caption = `🛍️ <b>KATALOG PRODUK ${config.STORE_NAME || 'MOAKUN STORE'}</b>\n`;
+  caption += `━━━━━━━━━━━━━━━━━━━━━━\n`;
+  caption += `<i>Pilih kategori produk di bawah untuk melihat variasi & harga:</i>\n\n`;
 
   let idx = startIndex + 1;
   pageCategories.forEach((c) => {
-    const stockBadge = c.total_stock > 0 ? `[Stok: ${c.total_stock}]` : `[🔴 Habis]`;
-    caption += `[${idx}] ${c.category.toUpperCase()} ${stockBadge}\n`;
+    const isReady = c.total_stock > 0;
+    const stockBadge = isReady ? `🟢 <b>Ready (${c.total_stock} Akun)</b>` : `🔴 <i>Stok Habis</i>`;
+    const priceDisplay = c.min_price === c.max_price
+      ? formatRupiah(c.min_price)
+      : `${formatRupiah(c.min_price)} - ${formatRupiah(c.max_price)}`;
+
+    caption += `<b>[${idx}] ${c.category.toUpperCase()}</b>\n`;
+    caption += `   ├ 💰 ${priceDisplay} (${c.var_count} Pilihan)\n`;
+    caption += `   └ 📦 ${stockBadge}\n\n`;
     idx++;
   });
 
-  caption += `---------------------------------------------------</blockquote>\n\n`;
-  caption += `<b>→ Ketik nomor produk (1-${totalCategories}) atau klik tombol untuk melihat detail variasi.</b>\n`;
-  caption += `Halaman ${currentPage} dari ${totalPages}`;
+  caption += `━━━━━━━━━━━━━━━━━━━━━━\n`;
+  caption += `👉 <b>Cara Beli:</b> Ketik angka <b>(1-${totalCategories})</b> di keyboard atau klik tombol di bawah.\n`;
+  caption += `📄 <i>Halaman ${currentPage} dari ${totalPages}</i>`;
 
   const inlineButtons = [];
+
+  // Direct category buttons for easy 1-tap UX
+  pageCategories.forEach((c, i) => {
+    const num = startIndex + i + 1;
+    const stockIcon = c.total_stock > 0 ? '🟢' : '🔴';
+    const stockText = c.total_stock > 0 ? `${c.total_stock} pcs` : 'Habis';
+    inlineButtons.push([{
+      text: `${stockIcon} [${num}] ${c.category.toUpperCase()} (${stockText})`,
+      callback_data: `sel_cat_idx_${num}`
+    }]);
+  });
+
   const navRow = [];
   if (currentPage > 1) navRow.push({ text: '◀️ Sebelumnya', callback_data: `cat_page_${currentPage - 1}` });
-  if (currentPage < totalPages) navRow.push({ text: 'Next ▶️', callback_data: `cat_page_${currentPage + 1}` });
+  if (currentPage < totalPages) navRow.push({ text: 'Berikutnya ▶️', callback_data: `cat_page_${currentPage + 1}` });
   if (navRow.length > 0) inlineButtons.push(navRow);
-  inlineButtons.push([{ text: '🔍 Cari Produk', callback_data: 'search_prompt' }]);
+
+  inlineButtons.push([
+    { text: '🔍 Cari Produk', callback_data: 'search_prompt' },
+    { text: '📱 Order OTP', callback_data: 'osp_1' }
+  ]);
 
   await editOrSendMessage(chatId, messageId, caption, { inline_keyboard: inlineButtons });
 }
@@ -490,26 +517,34 @@ async function showCategoryByIndex(chatId, index, messageId = null) {
   `, [categoryName]);
 
   const soldCount = soldRow ? soldRow.sold_count : 0;
-  const firstDesc = variants.length > 0 ? (variants[0].description || 'Full akses garansi akun premium') : '-';
+  const firstDesc = variants.length > 0 ? (variants[0].description || 'Full akses garansi 100%') : '-';
 
-  let caption = `<blockquote>\n`;
-  caption += `• Produk : <b>${categoryName.toUpperCase()}</b>\n`;
-  caption += `• Stok Terjual : <b>${soldCount} Akun</b>\n`;
-  caption += `• Info : <b>${firstDesc}</b>\n`;
-  caption += `---------------------------------\n`;
-  caption += `Pilih variasi di bawah untuk membeli:\n`;
+  let caption = `🛍️ <b>DETAIL PRODUK: ${categoryName.toUpperCase()}</b>\n`;
+  caption += `━━━━━━━━━━━━━━━━━━━━━━\n`;
+  caption += `📝 <b>Info:</b> <i>${firstDesc}</i>\n`;
+  caption += `📊 <b>Total Terjual:</b> <b>${soldCount} Akun</b>\n`;
+  caption += `━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+  caption += `👇 <b>Silakan pilih variasi akun yang ingin dibeli:</b>\n\n`;
 
   const inlineButtons = [];
 
-  variants.forEach(v => {
-    const stockStatus = v.stock_count > 0 ? `(${v.stock_count} pcs)` : `[HABIS]`;
-    caption += `• ${v.name}: <b>${formatRupiah(v.price)}</b> ${stockStatus}\n`;
-    const label = `${v.name} - ${formatRupiah(v.price)} (${v.stock_count})`;
-    inlineButtons.push([{ text: label, callback_data: `prod_detail_${v.id}` }]);
-  });
+  variants.forEach((v, i) => {
+    const isAvailable = v.stock_count > 0;
+    const stockBadge = isAvailable ? `🟢 Ready: <b>${v.stock_count} Akun</b>` : `🔴 <i>Stok Habis</i>`;
 
-  caption += `---------------------------------\n</blockquote>\n\n`;
-  caption += `🕒 Waktu: ${getCurrentTimeString()}`;
+    caption += `<b>${i + 1}. ${v.name}</b>\n`;
+    caption += `   ├ 💰 Harga: <b>${formatRupiah(v.price)}</b>\n`;
+    caption += `   └ 📦 Stok: ${stockBadge}\n\n`;
+
+    const label = isAvailable
+      ? `🛒 ${v.name} • ${formatRupiah(v.price)} (${v.stock_count})`
+      : `🔴 ${v.name} • [HABIS]`;
+
+    inlineButtons.push([{
+      text: label,
+      callback_data: isAvailable ? `prod_detail_${v.id}` : 'noop'
+    }]);
+  });
 
   inlineButtons.push([{ text: '🔙 Kembali ke Katalog', callback_data: 'cat_page_1' }]);
 
@@ -1791,6 +1826,13 @@ bot.on('callback_query', async (query) => {
     return bot.answerCallbackQuery(query.id);
   }
 
+  if (data.startsWith('sel_cat_idx_')) {
+    delete userStates[chatId];
+    const idx = parseInt(data.replace('sel_cat_idx_', ''));
+    await showCategoryByIndex(chatId, idx, messageId);
+    return bot.answerCallbackQuery(query.id);
+  }
+
   // === OTP CALLBACKS ===
   if (data.startsWith('osp_')) {
     const page = parseInt(data.replace('osp_', ''));
@@ -1968,17 +2010,22 @@ bot.on('callback_query', async (query) => {
     const product = await dbGet('SELECT * FROM products WHERE id = ?', [prodId]);
     const stock = await dbGet('SELECT COUNT(*) as count FROM product_stock WHERE product_id = ? AND status = \'available\'', [prodId]);
 
-    let text = `🤖 <b>${product.category} - ${product.name}</b>\n\n`;
-    text += `${product.description}\n\n`;
-    text += `💰 Harga Satuan: <b>${formatRupiah(product.price)}</b>\n`;
-    text += `📦 Stok Tersedia: <b>${stock.count} Account</b>\n`;
+    let text = `🛒 <b>DETAIL VARIASI PRODUK</b>\n`;
+    text += `━━━━━━━━━━━━━━━━━━━━━━\n`;
+    text += `🏷️ <b>Kategori:</b> ${product.category}\n`;
+    text += `📦 <b>Variasi:</b> ${product.name}\n`;
+    text += `💰 <b>Harga Satuan:</b> <b>${formatRupiah(product.price)}</b>\n`;
+    text += `📊 <b>Stok Tersedia:</b> <b>${stock.count > 0 ? '🟢 ' + stock.count + ' Akun' : '🔴 Habis'}</b>\n`;
+    text += `━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+    text += `📝 <b>Keterangan:</b>\n<i>${product.description || 'Full akses garansi 100%'}</i>\n\n`;
+    text += `⚡ <i>Pesanan akan langsung diproses dan dikirim otomatis 24 Jam.</i>`;
 
     const buttons = [];
     if (stock.count > 0) {
-      buttons.push([{ text: '🛒 BELI 1 PCS', callback_data: `buy_choose_${product.id}_1` }]);
-      buttons.push([{ text: '📦 BELI BULK / GROSIR', callback_data: `buy_bulk_prompt_${product.id}` }]);
+      buttons.push([{ text: '🛒 Beli 1 Pcs', callback_data: `buy_choose_${product.id}_1` }]);
+      buttons.push([{ text: '📦 Beli Grosir / Banyak', callback_data: `buy_bulk_prompt_${product.id}` }]);
     } else {
-      buttons.push([{ text: '🔴 STOCK HABIS', callback_data: 'noop' }]);
+      buttons.push([{ text: '🔴 STOK HABIS', callback_data: 'noop' }]);
     }
     buttons.push([{ text: '🔙 Kembali ke Katalog', callback_data: 'cat_page_1' }]);
 
