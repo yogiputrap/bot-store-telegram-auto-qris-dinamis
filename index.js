@@ -2970,6 +2970,15 @@ async function startBot() {
   await initDatabase();
   console.log(`✅ Database initialized successfully.`);
 
+  // Pre-seed Flash Sale items if not present
+  try {
+    for (const fsItem of FLASH_SALE_ITEMS) {
+      await getOrCreateFlashSaleProduct(fsItem);
+    }
+  } catch (fsErr) {
+    console.error('[FLASH SALE SEED ERROR]:', fsErr.message);
+  }
+
   // 1. CodeGatra Auto QRIS Payment Poller (Every 5s)
   CodeGatraService.startAutoPollingPaymentWorker({
     bot,
