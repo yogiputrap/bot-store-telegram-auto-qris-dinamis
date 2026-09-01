@@ -112,18 +112,47 @@ class CodeGatraService {
 
         const res = await client.post('/order', payload);
         const resData = res.data;
-        console.log('[CODEGATRA ORDER RESPONSE]:', JSON.stringify(resData));
+        console.log('[CODEGATRA ORDER RESPONSE FULL]:', JSON.stringify(resData, null, 2));
 
+        // Flatten: support both { data: {...} } and flat response
         const dataObj = resData.data || resData;
-        let qrString = dataObj.qr_string || dataObj.qrString || dataObj.raw_qr || dataObj.qr_code || dataObj.qr || dataObj.qris_data || dataObj.qris || dataObj.payload || '';
-        let qrImage = dataObj.qr_image || dataObj.qr_url || dataObj.qrImage || dataObj.qr_link || dataObj.image_url || dataObj.image || '';
+        console.log('[CODEGATRA DATA KEYS]:', Object.keys(dataObj));
+        console.log('[CODEGATRA DATA VALUES]:', JSON.stringify(dataObj, null, 2));
+
+        // Extract QR string (EMVCo payload / QRIS string)
+        let qrString = dataObj.qr_string
+          || dataObj.qrString
+          || dataObj.raw_qr
+          || dataObj.qr_code
+          || dataObj.qr
+          || dataObj.qris_data
+          || dataObj.qris
+          || dataObj.payload
+          || dataObj.emv
+          || '';
+
+        // Extract QR image (URL, base64, or EMVCo string in image field)
+        let qrImage = dataObj.qr_image
+          || dataObj.qr_url
+          || dataObj.qrImage
+          || dataObj.qr_link
+          || dataObj.image_url
+          || dataObj.image
+          || dataObj.qris_image
+          || dataObj.qr_img
+          || '';
+
         const totalAmount = Number(dataObj.total_amount || dataObj.totalAmount || dataObj.amount || amount);
-        const uniqueCode = Number(dataObj.unique_code || dataObj.uniqueCode || (totalAmount - amount) || 0);
+        const uniqueCode = Number(dataObj.unique_code || dataObj.uniqueCode || (totalAmount - roundedAmount) || 0);
+
+        console.log('[CODEGATRA] qrString:', qrString ? qrString.substring(0, 60) + '...' : '(kosong)');
+        console.log('[CODEGATRA] qrImage:', qrImage ? qrImage.substring(0, 120) : '(kosong)');
+        console.log('[CODEGATRA] totalAmount:', totalAmount, '| uniqueCode:', uniqueCode);
 
         let qrBuffer = null;
 
-        // 1. If CodeGatra returned a raw QR string, render it into PNG Buffer
-        if (qrString && typeof qrString === 'string' && qrString.length > 5 && !qrString.startsWith('http')) {
+        // 1. If CodeGatra returned a raw QR string (EMVCo), render it into PNG Buffer
+        if (qrString && typeof qrString === 'string' && qrString.length > 10 && !qrString.startsWith('http')) {
           try {
             qrBuffer = await QRCode.toBuffer(qrString, {
               type: 'png',
@@ -131,44 +160,56 @@ class CodeGatraService {
               margin: 2,
               color: { dark: '#000000', light: '#ffffff' }
             });
+            console.log('[CODEGATRA] QR buffer dibuat dari qr_string, panjang:', qrBuffer.length);
           } catch (e) {
             console.error('[CODEGATRA QR STRING RENDER ERROR]:', e.message);
           }
         }
 
-        // 2. If CodeGatra returned a base64 Data URL or raw base64 string
-        if (!qrBuffer && typeof qrImage === 'string') {
+        // 2. If CodeGatra returned a base64 Data URL or raw base64 string in qr_image
+        if (!qrBuffer && typeof qrImage === 'string' && qrImage.length > 0) {
           if (qrImage.startsWith('data:image')) {
             try {
               const base64Data = qrImage.replace(/^data:image\/\w+;base64,/, '');
               qrBuffer = Buffer.from(base64Data, 'base64');
-            } catch (e) {}
+              console.log('[CODEGATRA] QR buffer dibuat dari base64 data URL');
+            } catch (e) {
+              console.error('[CODEGATRA QR BASE64 ERROR]:', e.message);
+            }
           } else if (/^[A-Za-z0-9+/=]{100,}$/.test(qrImage.trim())) {
             try {
               qrBuffer = Buffer.from(qrImage.trim(), 'base64');
-            } catch (e) {}
+              console.log('[CODEGATRA] QR buffer dibuat dari raw base64 string');
+            } catch (e) {
+              console.error('[CODEGATRA QR RAW BASE64 ERROR]:', e.message);
+            }
           }
         }
 
         // 3. If CodeGatra returned an HTTP/HTTPS image URL, download image directly into Buffer
         if (!qrBuffer && typeof qrImage === 'string' && (qrImage.startsWith('http://') || qrImage.startsWith('https://'))) {
           try {
+            console.log('[CODEGATRA] Mencoba download QR image dari URL:', qrImage);
             const dlRes = await axios.get(qrImage, {
               responseType: 'arraybuffer',
-              timeout: 10000,
+              timeout: 15000,
               headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'image/*,*/*'
               }
             });
-            if (dlRes.data && dlRes.data.length > 0) {
+            if (dlRes.data && dlRes.data.byteLength > 0) {
               qrBuffer = Buffer.from(dlRes.data);
+              console.log('[CODEGATRA] QR buffer berhasil didownload dari URL, size:', qrBuffer.length);
+            } else {
+              console.error('[CODEGATRA] Download berhasil tapi response kosong');
             }
           } catch (e) {
-            console.error('[CODEGATRA QR IMAGE DOWNLOAD ERROR]:', e.message);
+            console.error('[CODEGATRA QR IMAGE DOWNLOAD ERROR]:', e.response?.status, e.message);
           }
         }
 
-        // 4. If qr_image is actually the EMVCo string
+        // 4. If qr_image field is actually an EMVCo string (not a URL)
         if (!qrBuffer && typeof qrImage === 'string' && qrImage.length > 20 && !qrImage.startsWith('http')) {
           try {
             qrBuffer = await QRCode.toBuffer(qrImage, {
@@ -177,7 +218,32 @@ class CodeGatraService {
               margin: 2,
               color: { dark: '#000000', light: '#ffffff' }
             });
-          } catch (e) {}
+            // Treat qrImage field as the actual qrString too
+            if (!qrString) qrString = qrImage;
+            console.log('[CODEGATRA] QR buffer dibuat dari qr_image (diperlakukan sebagai EMVCo string)');
+          } catch (e) {
+            console.error('[CODEGATRA QR IMAGE AS STRING ERROR]:', e.message);
+          }
+        }
+
+        // 5. Last resort: if we have qr_image URL but download failed, pass URL directly to Telegram
+        //    Telegram bot.sendPhoto() accepts a URL directly
+        if (!qrBuffer && typeof qrImage === 'string' && (qrImage.startsWith('http://') || qrImage.startsWith('https://'))) {
+          console.log('[CODEGATRA] Fallback: menggunakan qr_image URL langsung (tanpa download)');
+          // Return URL as qr_buffer placeholder — caller harus cek qr_image_url
+          return {
+            status: 'success',
+            raw: resData,
+            qr_string: qrString,
+            qr_image: qrImage,
+            qr_image_url: qrImage,  // URL langsung untuk Telegram sendPhoto
+            qr_buffer: null,
+            total_amount: totalAmount,
+            unique_code: uniqueCode,
+            amount: roundedAmount,
+            ref_id: refId,
+            expired_at: expiredAt
+          };
         }
 
         if (qrBuffer) {
@@ -195,9 +261,16 @@ class CodeGatraService {
           };
         }
 
+        // Log all available data fields to help debug
+        console.error('[CODEGATRA] SEMUA FIELD DALAM RESPONSE:');
+        Object.entries(dataObj).forEach(([k, v]) => {
+          const val = typeof v === 'string' ? v.substring(0, 100) : v;
+          console.error(`  ${k}: ${JSON.stringify(val)}`);
+        });
+
         return {
           status: 'error',
-          message: 'CodeGatra merespon tetapi data gambar/string QRIS tidak ditemukan dalam respon API.'
+          message: `CodeGatra merespon tetapi data gambar/string QRIS tidak ditemukan dalam respon API. Fields tersedia: [${Object.keys(dataObj).join(', ')}]`
         };
       } catch (err) {
         console.error('[CODEGATRA CREATE ORDER ERROR]:', err.response?.data || err.message);

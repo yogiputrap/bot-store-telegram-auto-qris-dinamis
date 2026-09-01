@@ -149,7 +149,7 @@ async function resolveQrBuffer(paymentObj) {
 
   // 3. String candidates from object or direct string
   const qrString = paymentObj.qrString || paymentObj.qr_string || paymentObj.raw_qr || paymentObj.qr_code || paymentObj.qris_data || paymentObj.qris || paymentObj.payload || (typeof paymentObj === 'string' && paymentObj.length > 10 && !paymentObj.startsWith('http') ? paymentObj : null);
-  let qrImage = paymentObj.qrImage || paymentObj.qr_image || paymentObj.qr_url || paymentObj.qr_link || paymentObj.image_url || paymentObj.image || (typeof paymentObj === 'string' && (paymentObj.startsWith('http') || paymentObj.startsWith('data:image')) ? paymentObj : null);
+  let qrImage = paymentObj.qr_image_url || paymentObj.qrImage || paymentObj.qr_image || paymentObj.qr_url || paymentObj.qr_link || paymentObj.image_url || paymentObj.image || (typeof paymentObj === 'string' && (paymentObj.startsWith('http') || paymentObj.startsWith('data:image')) ? paymentObj : null);
 
   // 4. Render from qrString if present
   if (qrString && typeof qrString === 'string' && qrString.length > 5 && !qrString.startsWith('http')) {
@@ -186,12 +186,13 @@ async function resolveQrBuffer(paymentObj) {
       try {
         const dlRes = await axios.get(qrImage, {
           responseType: 'arraybuffer',
-          timeout: 10000,
+          timeout: 15000,
           headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'image/*,*/*'
           }
         });
-        if (dlRes.data && dlRes.data.length > 0) {
+        if (dlRes.data && dlRes.data.byteLength > 0) {
           return Buffer.from(dlRes.data);
         }
       } catch (e) {
