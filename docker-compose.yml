@@ -1,11 +1,8 @@
-version: '3.8'
-
 services:
   moakun-store-bot:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: moakun-store-bot
     restart: unless-stopped
     env_file:
       - .env
@@ -23,9 +20,11 @@ services:
         max-size: "10m"
         max-file: "3"
 
-# Deklarasi named volumes (Docker simpan di /var/lib/docker/volumes/)
+# Deklarasi named volumes permanen (Docker simpan di /var/lib/docker/volumes/)
 volumes:
   moakun_database:
     name: moakun_database
+    external: true
   moakun_backups:
     name: moakun_backups
+    external: true
