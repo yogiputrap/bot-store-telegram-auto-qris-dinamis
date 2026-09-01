@@ -1,0 +1,12 @@
+# Nixpacks configuration for Dokploy
+[phases.setup]
+nixPkgs = ["nodejs_20", "pkg-config", "cairo", "pango", "libpng", "libjpeg", "giflib", "librsvg"]
+
+[phases.install]
+cmds = ["npm install"]
+
+[phases.build]
+cmds = []
+
+[start]
+cmd = "npm start"
