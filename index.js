@@ -584,12 +584,16 @@ const ADMIN_REPLY_KEYBOARD = {
 };
 
 async function checkChannelMember(userId) {
-  if (!config.CHANNEL_ID || !config.CHANNEL_ID.startsWith('-100')) return true;
+  const channelTarget = String(config.CHANNEL_ID || '').trim() || (config.CHANNEL_URL ? '@' + config.CHANNEL_URL.split('/').pop() : '');
+  if (!channelTarget || channelTarget === '0') return true;
+
   try {
-    const member = await bot.getChatMember(config.CHANNEL_ID, userId);
-    return ['creator', 'administrator', 'member'].includes(member.status);
+    const member = await bot.getChatMember(channelTarget, userId);
+    if (!member) return false;
+    return ['creator', 'administrator', 'member', 'restricted'].includes(member.status);
   } catch (err) {
-    return true;
+    console.warn(`[CHANNEL GATE] Check for user ${userId} in ${channelTarget}: ${err.message}`);
+    return false;
   }
 }
 
