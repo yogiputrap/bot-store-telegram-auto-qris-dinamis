@@ -380,6 +380,149 @@ class CodeGatraService {
     }
   }
 
+  // Process a single deposit payment (shared between background polling and manual refresh)
+  static async processSingleDeposit(dep, { bot, dbRun, dbGet, dbAll, dbTransaction, formatRupiah }) {
+    try {
+      const statusRes = await this.checkStatus(dep.ref_id);
+      if (statusRes.status === 'success') {
+        if (statusRes.payment_status === 'paid') {
+          // Confirm deposit atomically
+          await dbTransaction(async ({ dbRun }) => {
+            await dbRun(`UPDATE deposits SET status = 'approved', confirmed_at = DATETIME('now', 'localtime') WHERE id = ?`, [dep.id]);
+            await dbRun(`UPDATE users SET balance = balance + ? WHERE id = ?`, [dep.amount, dep.user_id]);
+            await dbRun(
+              `INSERT INTO balance_history (user_id, amount, type, description) VALUES (?, ?, 'DEPOSIT', ?)`,
+              [dep.user_id, dep.amount, `Auto Deposit QRIS #${dep.deposit_code}`]
+            );
+          });
+
+          // Notify User
+          const newBalance = (dep.user_balance || 0) + dep.amount;
+          let successMsg = `🎉 <b>DEPOSIT QRIS BERHASIL OTOMATIS!</b>\n\n`;
+          successMsg += `Deposit Code: <code>#${dep.deposit_code}</code>\n`;
+          successMsg += `Nominal Masuk: <b>${formatRupiah(dep.amount)}</b>\n`;
+          successMsg += `Saldo Saat Ini: <b>${formatRupiah(newBalance)}</b>\n\n`;
+          successMsg += `Terima kasih! Saldo Anda telah otomatis ditambahkan dan siap digunakan.`;
+
+          try {
+            await bot.sendMessage(dep.telegram_id, successMsg, { parse_mode: 'HTML' });
+          } catch (e) {}
+
+          // Notify Channel if configured
+          if (config.CHANNEL_ID && config.CHANNEL_ID.startsWith('-100')) {
+            try {
+              const chMsg = `⚡ <b>AUTO DEPOSIT MASUK!</b>\n\nNominal: <b>${formatRupiah(dep.amount)}</b>\nUser: @${dep.username || 'User'}\nMetode: <b>QRIS Otomatis</b>\nStatus: <b>SUCCESS</b>`;
+              await bot.sendMessage(config.CHANNEL_ID, chMsg, { parse_mode: 'HTML' });
+            } catch (e) {}
+          }
+          return { status: 'paid', message: 'Deposit berhasil diverifikasi dan saldo telah masuk!' };
+        } else if (statusRes.payment_status === 'expired' || statusRes.payment_status === 'cancelled') {
+          await dbRun(`UPDATE deposits SET status = 'expired' WHERE id = ?`, [dep.id]);
+          try {
+            await bot.sendMessage(dep.telegram_id, `⚠️ <b>DEPOSIT EXPIRED / KADALUARSA</b>\n\nKode Deposit <code>#${dep.deposit_code}</code> telah kadaluarsa. Silakan lakukan deposit ulang jika ingin mengisi saldo.`, { parse_mode: 'HTML' });
+          } catch (e) {}
+          return { status: 'expired', message: 'Deposit telah kadaluarsa atau dibatalkan.' };
+        } else {
+          return { status: 'pending', message: 'Pembayaran belum terdeteksi. Silakan transfer sesuai nominal yang tertera.' };
+        }
+      }
+      return { status: 'pending', message: 'Sedang mengecek ke gateway pembayaran...' };
+    } catch (err) {
+      console.error(`[PROCESS DEPOSIT ERR #${dep.deposit_code}]:`, err.message);
+      return { status: 'error', message: err.message };
+    }
+  }
+
+  // Process a single product order payment (shared between background polling and manual refresh)
+  static async processSingleProductPayment(pay, { bot, dbRun, dbGet, dbAll, dbTransaction, formatRupiah }) {
+    try {
+      const statusRes = await this.checkStatus(pay.ref_id);
+      if (statusRes.status === 'success') {
+        if (statusRes.payment_status === 'paid') {
+          const reqQty = pay.qty || 1;
+
+          // Fulfill order atomically
+          const stockItems = await dbAll(`
+            SELECT * FROM product_stock 
+            WHERE product_id = ? AND status = 'available' 
+            ORDER BY id ASC LIMIT ?
+          `, [pay.product_id, reqQty]);
+
+          if (stockItems.length < reqQty) {
+            // Mark as paid but stock issue -> alert owner
+            await dbRun(`UPDATE payments SET status = 'paid', confirmed_at = DATETIME('now', 'localtime') WHERE id = ?`, [pay.id]);
+            await dbRun(`UPDATE orders SET status = 'paid_stock_pending' WHERE id = ?`, [pay.order_id]);
+
+            const alertOwner = `⚠️ <b>PEMBAYARAN QRIS SUKSES, TAPI STOK KURANG!</b>\n\nOrder Code: <code>#${pay.order_code}</code>\nProduk: <b>${pay.category} - ${pay.prod_name}</b>\nJumlah diminta: ${reqQty}, Tersedia: ${stockItems.length}\nUser: @${pay.username || 'User'} (<code>${pay.telegram_id}</code>)\n\nHarap kirim akun manual ke pembeli!`;
+            try {
+              await bot.sendMessage(config.OWNER_ID, alertOwner, { parse_mode: 'HTML' });
+              await bot.sendMessage(pay.telegram_id, `🎉 <b>PEMBAYARAN QRIS TERKONFIRMASI!</b>\n\nOrder <code>#${pay.order_code}</code> telah lunas. Stok sedang disiapkan oleh admin dan akan segera dikirimkan.`, { parse_mode: 'HTML' });
+            } catch (e) {}
+            return { status: 'paid', message: 'Pembayaran sukses, stok sedang disiapkan admin!' };
+          } else {
+            // Stock is available -> fulfill immediately
+            await dbTransaction(async ({ dbRun }) => {
+              for (const item of stockItems) {
+                await dbRun(
+                  `UPDATE product_stock SET status = 'sold', order_id = ?, sold_at = DATETIME('now', 'localtime') WHERE id = ?`,
+                  [pay.order_code, item.id]
+                );
+              }
+              await dbRun(`UPDATE payments SET status = 'paid', confirmed_at = DATETIME('now', 'localtime') WHERE id = ?`, [pay.id]);
+              await dbRun(`UPDATE orders SET status = 'completed', stock_id = ?, completed_at = DATETIME('now', 'localtime') WHERE id = ?`, [stockItems[0].id, pay.order_id]);
+            });
+
+            // Send credentials to buyer
+            let successMsg = `🎉 <b>PEMBAYARAN QRIS BERHASIL (${reqQty} Pcs)</b>\n\n`;
+            successMsg += `Order Code: <code>#${pay.order_code}</code>\n`;
+            successMsg += `Produk: <b>${pay.category} - ${pay.prod_name}</b> (${reqQty} Pcs)\n`;
+            successMsg += `Total: <b>${formatRupiah(pay.total_amount || pay.amount)}</b>\n\n`;
+            successMsg += `━━━━━━━━━━━━━━━━━━\n`;
+            successMsg += `📦 <b>DETAIL AKUN / CREDENTIAL (${reqQty} Pcs):</b>\n\n`;
+
+            stockItems.forEach((item, index) => {
+              successMsg += `<b>[${index + 1}]</b>\n`;
+              successMsg += `📧 <b>Email:</b> <code>${item.email}</code>\n`;
+              successMsg += `🔑 <b>Password:</b> <code>${item.password}</code>\n`;
+              if (item.extra_data) successMsg += `ℹ️ <b>Extra:</b> <code>${item.extra_data}</code>\n`;
+              successMsg += `\n`;
+            });
+
+            successMsg += `━━━━━━━━━━━━━━━━━━\n\n`;
+            successMsg += `✅ Akun tersimpan otomatis di menu <b>📜 Riwayat Transaksi</b> (/riwayat).\n`;
+            successMsg += `Terima kasih telah berbelanja di <b>${config.STORE_NAME}</b>!`;
+
+            try {
+              await bot.sendMessage(pay.telegram_id, successMsg, { parse_mode: 'HTML' });
+            } catch (e) {}
+
+            // Send Testimonial to channel
+            if (config.CHANNEL_ID && config.CHANNEL_ID.startsWith('-100')) {
+              try {
+                const chMsg = `🛍️ <b>TRANSAKSI QRIS OTOMATIS SUKSES!</b>\n\n📦 <b>Produk:</b> ${pay.category} - ${pay.prod_name} (${reqQty} Pcs)\n💰 <b>Total:</b> ${formatRupiah(pay.amount)}\n👤 <b>Pembeli:</b> @${pay.username || 'Buyer'}\n⚡ <b>Proses:</b> Instan 24 Jam Otomatis`;
+                await bot.sendMessage(config.CHANNEL_ID, chMsg, { parse_mode: 'HTML' });
+              } catch (e) {}
+            }
+            return { status: 'paid', message: 'Pembayaran sukses & produk berhasil dikirim!' };
+          }
+        } else if (statusRes.payment_status === 'expired' || statusRes.payment_status === 'cancelled') {
+          await dbRun(`UPDATE payments SET status = 'expired' WHERE id = ?`, [pay.id]);
+          await dbRun(`UPDATE orders SET status = 'expired' WHERE id = ?`, [pay.order_id]);
+          try {
+            await bot.sendMessage(pay.telegram_id, `⚠️ <b>PEMBAYARAN QRIS EXPIRED</b>\n\nPembayaran untuk order <code>#${pay.order_code}</code> telah kadaluarsa. Silakan lakukan order baru jika ingin membeli.`, { parse_mode: 'HTML' });
+          } catch (e) {}
+          return { status: 'expired', message: 'Pembayaran telah kadaluarsa atau dibatalkan.' };
+        } else {
+          return { status: 'pending', message: 'Pembayaran belum terdeteksi. Silakan transfer sesuai nominal persis.' };
+        }
+      }
+      return { status: 'pending', message: 'Sedang mengecek status ke server gateway...' };
+    } catch (err) {
+      console.error(`[PROCESS PAYMENT ERR #${pay.order_code}]:`, err.message);
+      return { status: 'error', message: err.message };
+    }
+  }
+
   // Background Auto-Polling Worker (Runs every 5 seconds)
   static startAutoPollingPaymentWorker({ bot, dbRun, dbGet, dbAll, dbTransaction, formatRupiah }) {
     if (!this.isConfigured()) {
@@ -407,49 +550,7 @@ class CodeGatraService {
         `);
 
         for (const dep of pendingDeposits) {
-          try {
-            const statusRes = await this.checkStatus(dep.ref_id);
-            if (statusRes.status === 'success') {
-              if (statusRes.payment_status === 'paid') {
-                // Confirm deposit atomically
-                await dbTransaction(async ({ dbRun }) => {
-                  await dbRun(`UPDATE deposits SET status = 'approved', confirmed_at = DATETIME('now', 'localtime') WHERE id = ?`, [dep.id]);
-                  await dbRun(`UPDATE users SET balance = balance + ? WHERE id = ?`, [dep.amount, dep.user_id]);
-                  await dbRun(
-                    `INSERT INTO balance_history (user_id, amount, type, description) VALUES (?, ?, 'DEPOSIT', ?)`,
-                    [dep.user_id, dep.amount, `Auto Deposit QRIS #${dep.deposit_code}`]
-                  );
-                });
-
-                // Notify User
-                const newBalance = (dep.user_balance || 0) + dep.amount;
-                let successMsg = `🎉 <b>DEPOSIT QRIS BERHASIL OTOMATIS!</b>\n\n`;
-                successMsg += `Deposit Code: <code>#${dep.deposit_code}</code>\n`;
-                successMsg += `Nominal Masuk: <b>${formatRupiah(dep.amount)}</b>\n`;
-                successMsg += `Saldo Saat Ini: <b>${formatRupiah(newBalance)}</b>\n\n`;
-                successMsg += `Terima kasih! Saldo Anda telah otomatis ditambahkan dan siap digunakan.`;
-
-                try {
-                  await bot.sendMessage(dep.telegram_id, successMsg, { parse_mode: 'HTML' });
-                } catch (e) {}
-
-                // Notify Channel if configured
-                if (config.CHANNEL_ID && config.CHANNEL_ID.startsWith('-100')) {
-                  try {
-                    const chMsg = `⚡ <b>AUTO DEPOSIT MASUK!</b>\n\nNominal: <b>${formatRupiah(dep.amount)}</b>\nUser: @${dep.username || 'User'}\nMetode: <b>QRIS Otomatis</b>\nStatus: <b>SUCCESS</b>`;
-                    await bot.sendMessage(config.CHANNEL_ID, chMsg, { parse_mode: 'HTML' });
-                  } catch (e) {}
-                }
-              } else if (statusRes.payment_status === 'expired' || statusRes.payment_status === 'cancelled') {
-                await dbRun(`UPDATE deposits SET status = 'expired' WHERE id = ?`, [dep.id]);
-                try {
-                  await bot.sendMessage(dep.telegram_id, `⚠️ <b>DEPOSIT EXPIRED / KADALUARSA</b>\n\nKode Deposit <code>#${dep.deposit_code}</code> telah kadaluarsa. Silakan lakukan deposit ulang jika ingin mengisi saldo.`, { parse_mode: 'HTML' });
-                } catch (e) {}
-              }
-            }
-          } catch (itemErr) {
-            console.error(`[POLLING DEPOSIT ERR #${dep.deposit_code}]:`, itemErr.message);
-          }
+          await this.processSingleDeposit(dep, { bot, dbRun, dbGet, dbAll, dbTransaction, formatRupiah });
         }
 
         // 2. Check Pending Auto-QRIS Product Orders
@@ -465,85 +566,7 @@ class CodeGatraService {
         `);
 
         for (const pay of pendingPayments) {
-          try {
-            const statusRes = await this.checkStatus(pay.ref_id);
-            if (statusRes.status === 'success') {
-              if (statusRes.payment_status === 'paid') {
-                const reqQty = pay.qty || 1;
-
-                // Fulfill order atomically
-                const stockItems = await dbAll(`
-                  SELECT * FROM product_stock 
-                  WHERE product_id = ? AND status = 'available' 
-                  ORDER BY id ASC LIMIT ?
-                `, [pay.product_id, reqQty]);
-
-                if (stockItems.length < reqQty) {
-                  // Mark as paid but stock issue -> alert owner
-                  await dbRun(`UPDATE payments SET status = 'paid', confirmed_at = DATETIME('now', 'localtime') WHERE id = ?`, [pay.id]);
-                  await dbRun(`UPDATE orders SET status = 'paid_stock_pending' WHERE id = ?`, [pay.order_id]);
-
-                  const alertOwner = `⚠️ <b>PEMBAYARAN QRIS SUKSES, TAPI STOK KURANG!</b>\n\nOrder Code: <code>#${pay.order_code}</code>\nProduk: <b>${pay.category} - ${pay.prod_name}</b>\nJumlah diminta: ${reqQty}, Tersedia: ${stockItems.length}\nUser: @${pay.username || 'User'} (<code>${pay.telegram_id}</code>)\n\nHarap kirim akun manual ke pembeli!`;
-                  try {
-                    await bot.sendMessage(config.OWNER_ID, alertOwner, { parse_mode: 'HTML' });
-                    await bot.sendMessage(pay.telegram_id, `🎉 <b>PEMBAYARAN QRIS TERKONFIRMASI!</b>\n\nOrder <code>#${pay.order_code}</code> telah lunas. Stok sedang disiapkan oleh admin dan akan segera dikirimkan.`, { parse_mode: 'HTML' });
-                  } catch (e) {}
-                } else {
-                  // Stock is available -> fulfill immediately
-                  await dbTransaction(async ({ dbRun }) => {
-                    for (const item of stockItems) {
-                      await dbRun(
-                        `UPDATE product_stock SET status = 'sold', order_id = ?, sold_at = DATETIME('now', 'localtime') WHERE id = ?`,
-                        [pay.order_code, item.id]
-                      );
-                    }
-                    await dbRun(`UPDATE payments SET status = 'paid', confirmed_at = DATETIME('now', 'localtime') WHERE id = ?`, [pay.id]);
-                    await dbRun(`UPDATE orders SET status = 'completed', stock_id = ?, completed_at = DATETIME('now', 'localtime') WHERE id = ?`, [stockItems[0].id, pay.order_id]);
-                  });
-
-                  // Send credentials to buyer
-                  let successMsg = `🎉 <b>PEMBAYARAN QRIS BERHASIL (${reqQty} Pcs)</b>\n\n`;
-                  successMsg += `Order Code: <code>#${pay.order_code}</code>\n`;
-                  successMsg += `Produk: <b>${pay.category} - ${pay.prod_name}</b> (${reqQty} Pcs)\n`;
-                  successMsg += `Total: <b>${formatRupiah(pay.total_amount || pay.amount)}</b>\n\n`;
-                  successMsg += `━━━━━━━━━━━━━━━━━━\n`;
-                  successMsg += `📦 <b>DETAIL AKUN / CREDENTIAL (${reqQty} Pcs):</b>\n\n`;
-
-                  stockItems.forEach((item, index) => {
-                    successMsg += `<b>[${index + 1}]</b>\n`;
-                    successMsg += `📧 <b>Email:</b> <code>${item.email}</code>\n`;
-                    successMsg += `🔑 <b>Password:</b> <code>${item.password}</code>\n`;
-                    if (item.extra_data) successMsg += `ℹ️ <b>Extra:</b> <code>${item.extra_data}</code>\n`;
-                    successMsg += `\n`;
-                  });
-
-                  successMsg += `━━━━━━━━━━━━━━━━━━\n\n`;
-                  successMsg += `✅ Akun tersimpan otomatis di menu <b>📜 Riwayat Transaksi</b> (/riwayat).\n`;
-                  successMsg += `Terima kasih telah berbelanja di <b>${config.STORE_NAME}</b>!`;
-
-                  try {
-                    await bot.sendMessage(pay.telegram_id, successMsg, { parse_mode: 'HTML' });
-                  } catch (e) {}
-
-                  // Send Testimonial to channel
-                  if (config.CHANNEL_ID && config.CHANNEL_ID.startsWith('-100')) {
-                    try {
-                      const chMsg = `🛍️ <b>TRANSAKSI QRIS OTOMATIS SUKSES!</b>\n\n📦 <b>Produk:</b> ${pay.category} - ${pay.prod_name} (${reqQty} Pcs)\n💰 <b>Total:</b> ${formatRupiah(pay.amount)}\n👤 <b>Pembeli:</b> @${pay.username || 'Buyer'}\n⚡ <b>Proses:</b> Instan 24 Jam Otomatis`;
-                      await bot.sendMessage(config.CHANNEL_ID, chMsg, { parse_mode: 'HTML' });
-                    } catch (e) {}
-                  }
-                }
-              } else if (statusRes.payment_status === 'expired' || statusRes.payment_status === 'cancelled') {
-                await dbRun(`UPDATE payments SET status = 'expired' WHERE id = ?`, [pay.id]);
-                await dbRun(`UPDATE orders SET status = 'expired' WHERE id = ?`, [pay.order_id]);
-                try {
-                  await bot.sendMessage(pay.telegram_id, `⚠️ <b>PEMBAYARAN QRIS EXPIRED</b>\n\nPembayaran untuk order <code>#${pay.order_code}</code> telah kadaluarsa. Silakan lakukan order baru jika ingin membeli.`, { parse_mode: 'HTML' });
-                } catch (e) {}
-              }
-            }
-          } catch (itemErr) {
-            console.error(`[POLLING PAYMENT ERR #${pay.order_code}]:`, itemErr.message);
-          }
+          await this.processSingleProductPayment(pay, { bot, dbRun, dbGet, dbAll, dbTransaction, formatRupiah });
         }
       } catch (loopErr) {
         console.error('[POLLING WORKER LOOP ERR]:', loopErr.message);
