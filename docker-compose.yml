@@ -1,11 +1,11 @@
 version: '3.8'
 
 services:
-  jstore-bot:
+  moakun-store-bot:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: jstore-telegram-bot
+    container_name: moakun-store-bot
     restart: unless-stopped
     env_file:
       - .env
@@ -15,8 +15,8 @@ services:
     volumes:
       # Named volumes — dikelola Docker, tidak bergantung path Dokploy
       # Data TIDAK akan hilang saat redeploy
-      - jstore_database:/app/database
-      - jstore_backups:/app/backups
+      - moakun_database:/app/database
+      - moakun_backups:/app/backups
     logging:
       driver: "json-file"
       options:
@@ -25,7 +25,7 @@ services:
 
 # Deklarasi named volumes (Docker simpan di /var/lib/docker/volumes/)
 volumes:
-  jstore_database:
+  moakun_database:
     driver: local
-  jstore_backups:
+  moakun_backups:
     driver: local

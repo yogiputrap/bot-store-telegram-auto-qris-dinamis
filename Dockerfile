@@ -1,6 +1,6 @@
 # ================================================================
 # DOCKERFILE FOR DOKPLOY & CONTAINER DEPLOYMENT
-# JStore Digital Bot (Node.js 20 on Debian Bookworm Slim)
+# Moakun Store Bot (Node.js 20 on Debian Bookworm Slim)
 # ================================================================
 
 FROM node:20-bookworm-slim AS base

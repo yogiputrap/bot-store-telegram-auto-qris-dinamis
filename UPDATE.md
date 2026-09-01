@@ -1,5 +1,5 @@
 # 📚 DOKUMENTASI ARSITEKTUR & PEMBARUAN SISTEM
-## JStore Digital Bot (v1.3.0 → v2.0.0 Enterprise Edition)
+## Moakun Store Bot (v1.3.0 → v2.0.0 Enterprise Edition)
 *Digital Premium Store & Virtual SMS OTP Telegram Bot with 100% CodeGatra Auto QRIS*
 
 ---
@@ -21,7 +21,7 @@
 
 ## 1. RINGKASAN PROYEK
 
-**JStore Digital Bot** adalah bot Telegram e-commerce hibrida yang dirancang untuk menjual:
+**Moakun Store Bot** adalah bot Telegram e-commerce hibrida yang dirancang untuk menjual:
 1. **Akun & Lisensi Produk Digital**: Canva Pro, Spotify Premium, Netflix, ChatGPT Plus, CapCut Pro, dan produk digital lainnya dengan pemenuhan stok instan.
 2. **Nomor Virtual SMS OTP**: Penyediaan nomor telepon virtual dari berbagai negara untuk verifikasi SMS aplikasi (WhatsApp, Telegram, Google, TikTok, dll) yang terintegrasi dengan RumahOTP API.
 3. **Sistem Pembayaran 100% Auto QRIS 24 Jam**: Pembuatan QRIS dinamis dengan nominal unik dan pelacakan pembayaran otomatis via CodeGatra Gateway (`pay.codegatra.com`). Seluruh metode manual dan bukti transfer foto telah dihapus secara total demi kecepatan dan otomatisasi penuh.
@@ -269,7 +269,7 @@ Integrasi mengacu pada spesifikasi resmi API CodeGatra (`https://pay.codegatra.c
    - Payload:
      ```json
      {
-       "nama_project": "jstore",
+       "nama_project": "moakun-store",
        "ref_id": "ORD-1725180000-123",
        "amount": 35000,
        "customer_name": "Username",
@@ -363,7 +363,7 @@ Buka atau buat file `.env` pada direktori utama bot:
 
 ```env
 # ================================================================
-# JSTORE DIGITAL BOT - ENVIRONMENT CONFIGURATION
+# MOAKUN STORE DIGITAL BOT - ENVIRONMENT CONFIGURATION
 # ================================================================
 
 # Telegram Bot Credentials
@@ -421,8 +421,8 @@ Bot ini telah dilengkapi konfigurasi `Dockerfile` dan `docker-compose.yml` yang 
    - Masukkan variabel dari file `.env` (terutama `BOT_TOKEN`, `OWNER_ID`, `CODEGATRA_API_KEY`, `CODEGATRA_NAMA_PROJECT`, `RUMAHOTP_API_KEY`).
 4. **Konfigurasi Persistent Volumes (PENTING)**:
    - Buka tab **Volumes / Storage** di Dokploy:
-     - **Mount Path 1**: `/app/database` → Host Path: `/etc/dokploy/volumes/jstore-data`
-     - **Mount Path 2**: `/app/backups` → Host Path: `/etc/dokploy/volumes/jstore-backups`
+     - **Mount Path 1**: `/app/database` → Host Path: `/etc/dokploy/volumes/moakun-data`
+     - **Mount Path 2**: `/app/backups` → Host Path: `/etc/dokploy/volumes/moakun-backups`
    - *Tujuan:* Memastikan data user, stok akun, dan transaksi SQLite tetap tersimpan aman saat bot di-restart atau di-update!
 5. **Deploy**:
    - Klik tombol **Deploy**. Dokploy akan meng-compile container Debian Bookworm dengan dependensi Canvas C++ dan menjalankan bot 24 jam nonstop!
@@ -446,7 +446,7 @@ Bot ini telah dilengkapi konfigurasi `Dockerfile` dan `docker-compose.yml` yang 
    Atau menggunakan PM2 untuk proses latar belakang:
    ```bash
    npm install -g pm2
-   pm2 start index.js --name "jstore-bot"
+   pm2 start index.js --name "moakun-store-bot"
    pm2 save
    ```
 
