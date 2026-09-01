@@ -966,25 +966,24 @@ async function showUserHistory(chatId, user, messageId = null) {
 
 // FLASH SALE DATA & HELPER
 const FLASH_SALE_ITEMS = [
-  { id: 1, name: 'Link Redem Gemini 3 Bulan', category: 'GEMINI AI', price: 13000, origPrice: 25000, shortLabel: 'Gemini 3B (13K)' },
-  { id: 2, name: 'Gemini Head Akun 3 Bulan', category: 'GEMINI AI', price: 35000, origPrice: 45000, shortLabel: 'Gemini Head (35K)' },
-  { id: 3, name: 'CapCut Pro 1 Bulan', category: 'CAPCUT PRO', price: 25000, origPrice: 35000, shortLabel: 'CapCut Pro 1B (25K)' },
-  { id: 4, name: 'Link Redem Gemini 18 Bulan', category: 'GEMINI AI', price: 15000, origPrice: 25000, shortLabel: 'Gemini 18B (15K)' },
-  { id: 5, name: 'Leonardo Kredit 8500', category: 'LEONARDO AI', price: 10000, origPrice: 15000, shortLabel: 'Leonardo 8.5K (10K)' },
-  { id: 6, name: 'ChatGPT Plus 1 Bulan', category: 'CHATGPT+', price: 45000, origPrice: 55000, shortLabel: 'ChatGPT+ 1B (45K)' },
-  { id: 7, name: 'Spotify 1 Bulan', category: 'SPOTIFY PREMIUM', price: 15000, origPrice: 25000, shortLabel: 'Spotify 1B (15K)' }
+  { id: 1, name: 'Link Redem Gemini 3 Bulan', category: '⚡ FLASH SALE', price: 13000, origPrice: 25000, shortLabel: 'Gemini 3B (13K)' },
+  { id: 2, name: 'Gemini Head Akun 3 Bulan', category: '⚡ FLASH SALE', price: 35000, origPrice: 45000, shortLabel: 'Gemini Head (35K)' },
+  { id: 3, name: 'CapCut Pro 1 Bulan', category: '⚡ FLASH SALE', price: 25000, origPrice: 35000, shortLabel: 'CapCut Pro 1B (25K)' },
+  { id: 4, name: 'Link Redem Gemini 18 Bulan', category: '⚡ FLASH SALE', price: 15000, origPrice: 25000, shortLabel: 'Gemini 18B (15K)' },
+  { id: 5, name: 'Leonardo Kredit 8500', category: '⚡ FLASH SALE', price: 10000, origPrice: 15000, shortLabel: 'Leonardo 8.5K (10K)' },
+  { id: 6, name: 'ChatGPT Plus 1 Bulan', category: '⚡ FLASH SALE', price: 45000, origPrice: 55000, shortLabel: 'ChatGPT+ 1B (45K)' },
+  { id: 7, name: 'Spotify 1 Bulan', category: '⚡ FLASH SALE', price: 15000, origPrice: 25000, shortLabel: 'Spotify 1B (15K)' }
 ];
 
 async function getOrCreateFlashSaleProduct(item) {
-  let prod = await dbGet('SELECT * FROM products WHERE (name LIKE ? OR name LIKE ?) AND status = \'active\' LIMIT 1', [
-    `%${item.name}%`,
-    `%${item.name.replace(/\s*\(.*?\)\s*/g, '')}%`
+  let prod = await dbGet('SELECT * FROM products WHERE name = ? AND category = \'⚡ FLASH SALE\' AND status = \'active\' LIMIT 1', [
+    item.name
   ]);
 
   if (!prod) {
     const res = await dbRun(
       'INSERT INTO products (category, name, price, description, status) VALUES (?, ?, ?, ?, \'active\')',
-      [item.category, item.name, item.price, `Promo Flash Sale ${item.name}. Full garansi 100%.`]
+      ['⚡ FLASH SALE', item.name, item.price, `Promo Flash Sale ${item.name}. Full garansi 100%.`]
     );
     prod = await dbGet('SELECT * FROM products WHERE id = ?', [res.lastID]);
   }
@@ -1869,7 +1868,7 @@ bot.on('message', async (msg) => {
     }
 
     if (text === '📥 Add Stock') {
-      const products = await dbAll('SELECT * FROM products WHERE status = \'active\'');
+      const products = await dbAll('SELECT * FROM products WHERE status = \'active\' ORDER BY CASE WHEN category = \'⚡ FLASH SALE\' THEN 0 ELSE 1 END, category ASC, id ASC');
       const inline = products.map(p => [{ text: `${p.category} - ${p.name}`, callback_data: `admin_sel_stock_prod_${p.id}` }]);
       inline.push([{ text: '🔙 Batal', callback_data: 'cancel_state' }]);
       return bot.sendMessage(chatId, `📦 <b>TAMBAH STOCK</b>\n\nPilih produk/variasi yang ingin diisi stock:`, {
