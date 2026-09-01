@@ -990,53 +990,71 @@ async function getOrCreateFlashSaleProduct(item) {
   return prod;
 }
 
-// FLASH SALE SCREEN
+// FLASH SALE SCREEN (100% DINAMIS DARI DATABASE)
 async function showFlashSale(chatId, messageId = null) {
+  const fsProducts = await dbAll("SELECT * FROM products WHERE category = '⚡ FLASH SALE' AND status = 'active' ORDER BY id ASC");
+
+  if (fsProducts.length === 0) {
+    let emptyText = `┊ ⚡ <b>FLASH SALE</b> ⚡\n`;
+    emptyText += `┊\n`;
+    emptyText += `┊ <i>Saat ini belum ada produk promo Flash Sale aktif.</i>\n`;
+    emptyText += `╰─────────────────✧`;
+
+    const emptyButtons = [[{ text: '🔙 Kembali ke Katalog', callback_data: 'cat_page_1' }]];
+    return editOrSendMessage(chatId, messageId, emptyText, { inline_keyboard: emptyButtons });
+  }
+
   let text = `┊ ⚡ <b>FLASH SALE</b> ⚡\n`;
-  text += `┊\n`;
-  text += `┊ 🔥 <b>LINK REDEM GEMINI 3 BULAN</b>\n`;
-  text += `┊    Rp25.000 ➜ Rp13.000\n`;
-  text += `┊\n`;
-  text += `┊ 🔥 <b>GEMINI HEAD AKUN 3 BULAN</b>\n`;
-  text += `┊    Rp45.000 ➜ Rp35.000\n`;
-  text += `┊\n`;
-  text += `┊ 🔥 <b>CAPCUT PRO 1 BULAN</b>\n`;
-  text += `┊    Rp35.000 ➜ Rp25.000\n`;
-  text += `┊\n`;
-  text += `┊ 🔥 <b>LINK REDEM GEMINI 18 BULAN</b>\n`;
-  text += `┊    Rp25.000 ➜ Rp15.000\n`;
-  text += `┊\n`;
-  text += `┊ 🔥 <b>LEONARDO KREDIT 8500</b>\n`;
-  text += `┊    Rp15.000 ➜ Rp10.000\n`;
-  text += `┊\n`;
-  text += `┊ 🔥 <b>ChatGpt PLUS 1 BULAN</b>\n`;
-  text += `┊    Rp55.000 ➜ Rp45.000\n`;
-  text += `┊\n`;
-  text += `┊ 🔥 <b>Spotify 1 Bulan</b>\n`;
-  text += `┊    Rp25.000 ➜ Rp15.000\n`;
+
+  const PRESET_ORIG_PRICES = {
+    'LINK REDEM GEMINI 3 BULAN': 25000,
+    'GEMINI HEAD AKUN 3 BULAN': 45000,
+    'CAPCUT PRO 1 BULAN': 35000,
+    'LINK REDEM GEMINI 18 BULAN': 25000,
+    'LEONARDO KREDIT 8500': 15000,
+    'CHATGPT PLUS 1 BULAN': 55000,
+    'SPOTIFY 1 BULAN': 25000
+  };
+
+  fsProducts.forEach((p) => {
+    const key = p.name.trim().toUpperCase();
+    const origPrice = PRESET_ORIG_PRICES[key] || Math.ceil((p.price * 1.4) / 1000) * 1000;
+
+    text += `┊\n`;
+    text += `┊ 🔥 <b>${p.name.toUpperCase()}</b>\n`;
+    text += `┊    ${formatRupiah(origPrice)} ➜ ${formatRupiah(p.price)}\n`;
+  });
+
   text += `╰─────────────────✧\n\n`;
   text += `<i>⚠️ Stok terbatas! Klik produk di bawah untuk langsung beli:</i>`;
 
-  const buttons = [
-    [
-      { text: '🔥 [1] Gemini 3B (13K)', callback_data: 'fs_buy_1' },
-      { text: '🔥 [2] Gemini Head (35K)', callback_data: 'fs_buy_2' }
-    ],
-    [
-      { text: '🔥 [3] CapCut Pro 1B (25K)', callback_data: 'fs_buy_3' },
-      { text: '🔥 [4] Gemini 18B (15K)', callback_data: 'fs_buy_4' }
-    ],
-    [
-      { text: '🔥 [5] Leonardo 8.5K (10K)', callback_data: 'fs_buy_5' },
-      { text: '🔥 [6] ChatGPT+ 1B (45K)', callback_data: 'fs_buy_6' }
-    ],
-    [
-      { text: '🔥 [7] Spotify 1B (15K)', callback_data: 'fs_buy_7' }
-    ],
-    [
-      { text: '🔙 Kembali ke Katalog', callback_data: 'cat_page_1' }
-    ]
-  ];
+  const buttons = [];
+  let currentRow = [];
+
+  fsProducts.forEach((p, idx) => {
+    const num = idx + 1;
+    const priceK = p.price >= 1000 ? `${Math.round(p.price / 1000)}K` : formatRupiah(p.price);
+    let shortName = p.name;
+    if (shortName.length > 15) {
+      shortName = shortName.replace(/Link Redem /i, '').replace(/Akun /i, '').slice(0, 14);
+    }
+
+    currentRow.push({
+      text: `🔥 [${num}] ${shortName} (${priceK})`,
+      callback_data: `prod_detail_${p.id}`
+    });
+
+    if (currentRow.length === 2) {
+      buttons.push(currentRow);
+      currentRow = [];
+    }
+  });
+
+  if (currentRow.length > 0) {
+    buttons.push(currentRow);
+  }
+
+  buttons.push([{ text: '🔙 Kembali ke Katalog', callback_data: 'cat_page_1' }]);
 
   await editOrSendMessage(chatId, messageId, text, { inline_keyboard: buttons });
 }
@@ -2171,37 +2189,6 @@ bot.on('callback_query', async (query) => {
     return showFlashSale(chatId, messageId);
   }
 
-  if (data.startsWith('fs_buy_')) {
-    const fsIndex = parseInt(data.split('_')[2]) - 1;
-    const fsItem = FLASH_SALE_ITEMS[fsIndex];
-    if (fsItem) {
-      bot.answerCallbackQuery(query.id, { text: `Memuat ${fsItem.name}...` });
-      const product = await getOrCreateFlashSaleProduct(fsItem);
-      const stock = await dbGet('SELECT COUNT(*) as count FROM product_stock WHERE product_id = ? AND status = \'available\'', [product.id]);
-
-      let text = `🛒 <b>DETAIL VARIASI PRODUK (FLASH SALE)</b>\n`;
-      text += `━━━━━━━━━━━━━━━━━━━━━━\n`;
-      text += `🏷️ <b>Kategori:</b> ${product.category}\n`;
-      text += `📦 <b>Variasi:</b> ${product.name}\n`;
-      text += `💰 <b>Harga Flash Sale:</b> <b>${formatRupiah(product.price)}</b> <s>${formatRupiah(fsItem.origPrice)}</s>\n`;
-      text += `📊 <b>Stok Tersedia:</b> <b>${stock.count > 0 ? '🟢 ' + stock.count + ' Akun' : '🔴 Habis'}</b>\n`;
-      text += `━━━━━━━━━━━━━━━━━━━━━━\n\n`;
-      text += `📝 <b>Keterangan:</b>\n<i>${product.description || 'Full akses garansi 100%'}</i>\n\n`;
-      text += `⚡ <i>Pesanan akan langsung diproses dan dikirim otomatis 24 Jam.</i>`;
-
-      const buttons = [];
-      if (stock.count > 0) {
-        buttons.push([{ text: `🛒 Beli 1 Pcs (${formatRupiah(product.price)})`, callback_data: `buy_choose_${product.id}_1` }]);
-        buttons.push([{ text: '📦 Beli Grosir / Banyak', callback_data: `buy_bulk_prompt_${product.id}` }]);
-      } else {
-        buttons.push([{ text: '🔴 STOK HABIS (Hubungi Admin)', callback_data: 'noop' }]);
-      }
-      buttons.push([{ text: '🔙 Kembali ke Flash Sale', callback_data: 'show_flash_sale' }]);
-
-      return editOrSendMessage(chatId, messageId, text, { inline_keyboard: buttons });
-    }
-  }
-
   if (data === 'deposit_prompt') {
     userStates[chatId] = { step: 'AWAITING_DEPOSIT_AMOUNT' };
     bot.sendMessage(chatId, `💰 <b>DEPOSIT SALDO INSTAN</b>\n\nSaldo Anda saat ini: <b>${formatRupiah(user.balance)}</b>\n\nMasukkan nominal deposit:\nMinimal deposit: <b>${formatRupiah(config.MIN_DEPOSIT)}</b>`, {
@@ -2541,13 +2528,18 @@ bot.on('callback_query', async (query) => {
     delete userStates[chatId];
     const prodId = parseInt(data.split('_')[2]);
     const product = await dbGet('SELECT * FROM products WHERE id = ?', [prodId]);
+    if (!product) {
+      bot.answerCallbackQuery(query.id, { text: 'Produk tidak ditemukan.' });
+      return renderCatalog(chatId, 1, messageId);
+    }
     const stock = await dbGet('SELECT COUNT(*) as count FROM product_stock WHERE product_id = ? AND status = \'available\'', [prodId]);
 
-    let text = `🛒 <b>DETAIL VARIASI PRODUK</b>\n`;
+    const isFs = product.category === '⚡ FLASH SALE';
+    let text = `🛒 <b>DETAIL VARIASI PRODUK ${isFs ? '(⚡ FLASH SALE)' : ''}</b>\n`;
     text += `━━━━━━━━━━━━━━━━━━━━━━\n`;
     text += `🏷️ <b>Kategori:</b> ${product.category}\n`;
     text += `📦 <b>Variasi:</b> ${product.name}\n`;
-    text += `💰 <b>Harga Satuan:</b> <b>${formatRupiah(product.price)}</b>\n`;
+    text += `💰 <b>Harga:</b> <b>${formatRupiah(product.price)}</b>\n`;
     text += `📊 <b>Stok Tersedia:</b> <b>${stock.count > 0 ? '🟢 ' + stock.count + ' Akun' : '🔴 Habis'}</b>\n`;
     text += `━━━━━━━━━━━━━━━━━━━━━━\n\n`;
     text += `📝 <b>Keterangan:</b>\n<i>${product.description || 'Full akses garansi 100%'}</i>\n\n`;
@@ -2555,12 +2547,17 @@ bot.on('callback_query', async (query) => {
 
     const buttons = [];
     if (stock.count > 0) {
-      buttons.push([{ text: '🛒 Beli 1 Pcs', callback_data: `buy_choose_${product.id}_1` }]);
+      buttons.push([{ text: `🛒 Beli 1 Pcs (${formatRupiah(product.price)})`, callback_data: `buy_choose_${product.id}_1` }]);
       buttons.push([{ text: '📦 Beli Grosir / Banyak', callback_data: `buy_bulk_prompt_${product.id}` }]);
     } else {
       buttons.push([{ text: '🔴 STOK HABIS', callback_data: 'noop' }]);
     }
-    buttons.push([{ text: '🔙 Kembali ke Katalog', callback_data: 'cat_page_1' }]);
+
+    if (isFs) {
+      buttons.push([{ text: '🔙 Kembali ke Flash Sale', callback_data: 'show_flash_sale' }]);
+    } else {
+      buttons.push([{ text: '🔙 Kembali ke Katalog', callback_data: 'cat_page_1' }]);
+    }
 
     await editOrSendMessage(chatId, messageId, text, { inline_keyboard: buttons });
     return bot.answerCallbackQuery(query.id);
