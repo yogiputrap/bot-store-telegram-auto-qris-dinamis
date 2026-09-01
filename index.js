@@ -696,7 +696,7 @@ async function renderCatalog(chatId, page = 1, messageId = null) {
 
   inlineButtons.push([
     { text: '🔍 Cari Produk', callback_data: 'search_prompt' },
-    { text: '📱 Order OTP', callback_data: 'osp_1' }
+    { text: '⚡ Flash Sale', callback_data: 'show_flash_sale' }
   ]);
 
   await editOrSendMessage(chatId, messageId, caption, { inline_keyboard: inlineButtons });
@@ -964,6 +964,40 @@ async function showUserHistory(chatId, user, messageId = null) {
   await editOrSendMessage(chatId, messageId, text, { inline_keyboard: buttons });
 }
 
+// FLASH SALE SCREEN
+async function showFlashSale(chatId, messageId = null) {
+  let text = `┊ ⚡ <b>FLASH SALE</b> ⚡\n`;
+  text += `┊\n`;
+  text += `┊ 🔥 <b>LINK REDEM GEMINI 3 BULAN</b>\n`;
+  text += `┊    Rp25.000 ➜ Rp13.000\n`;
+  text += `┊\n`;
+  text += `┊ 🔥 <b>GEMINI HEAD AKUN 3 BULAN</b>\n`;
+  text += `┊    Rp45.000 ➜ Rp35.000\n`;
+  text += `┊\n`;
+  text += `┊ 🔥 <b>CAPCUT PRO 1 BULAN</b>\n`;
+  text += `┊    Rp35.000 ➜ Rp25.000\n`;
+  text += `┊\n`;
+  text += `┊ 🔥 <b>LINK REDEM GEMINI 18 BULAN</b>\n`;
+  text += `┊    Rp25.000 ➜ Rp15.000\n`;
+  text += `┊\n`;
+  text += `┊ 🔥 <b>LEONARDO KREDIT 8500</b>\n`;
+  text += `┊    Rp15.000 ➜ Rp10.000\n`;
+  text += `┊\n`;
+  text += `┊ 🔥 <b>ChatGpt PLUS 1 BULAN</b>\n`;
+  text += `┊    Rp55.000 ➜ Rp45.000\n`;
+  text += `┊\n`;
+  text += `┊ 🔥 <b>Spotify 1 Bulan</b>\n`;
+  text += `┊    Rp25.000 ➜ Rp15.000\n`;
+  text += `╰─────────────────✧\n\n`;
+  text += `<i>⚠️ Stok terbatas! Segera pesan sebelum kehabisan.</i>`;
+
+  const buttons = [
+    [{ text: '🛒 Beli di Katalog', callback_data: 'cat_page_1' }]
+  ];
+
+  await editOrSendMessage(chatId, messageId, text, { inline_keyboard: buttons });
+}
+
 // PAYMENT CHOICE & CHECKOUT SCREEN
 async function sendPaymentChoice(chatId, messageId, user, product, qty = 1, appliedVoucher = null) {
   const stock = await dbGet('SELECT COUNT(*) as count FROM product_stock WHERE product_id = ? AND status = \'available\'', [product.id]);
@@ -1174,6 +1208,12 @@ bot.onText(/\/voucher(?:\s+(.+))?/, async (msg, match) => {
   } else {
     return bot.sendMessage(msg.chat.id, `❌ ${vCheck.message}`);
   }
+});
+
+bot.onText(/\/(flashsale|promo)/, async (msg) => {
+  await registerUser(msg.from);
+  delete userStates[msg.chat.id];
+  await showFlashSale(msg.chat.id, null);
 });
 
 bot.onText(/\/backup/, async (msg) => {
@@ -2073,6 +2113,11 @@ bot.on('callback_query', async (query) => {
     delete userStates[chatId];
     bot.answerCallbackQuery(query.id, { text: 'Aksi dibatalkan' });
     return renderCatalog(chatId, 1, messageId);
+  }
+
+  if (data === 'show_flash_sale') {
+    bot.answerCallbackQuery(query.id);
+    return showFlashSale(chatId, messageId);
   }
 
   if (data === 'deposit_prompt') {
