@@ -102,14 +102,17 @@ async function editOrSendMessage(chatId, messageId, captionText, replyMarkup) {
     }
   }
 
-  if (config.BANNER_URL && config.BANNER_URL.startsWith('http')) {
+  if (config.BANNER_URL) {
     try {
-      await bot.sendPhoto(chatId, config.BANNER_URL, {
-        caption: captionText,
-        parse_mode: 'HTML',
-        reply_markup: safeMarkup
-      });
-      return;
+      let photoSource = config.BANNER_URL;
+      if (photoSource.startsWith('http') || fs.existsSync(photoSource)) {
+        await bot.sendPhoto(chatId, photoSource, {
+          caption: captionText,
+          parse_mode: 'HTML',
+          reply_markup: safeMarkup
+        });
+        return;
+      }
     } catch (photoErr) {
       // Fallback to text
     }

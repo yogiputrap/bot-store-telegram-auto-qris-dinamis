@@ -66,13 +66,13 @@ module.exports = {
   ADMIN_IDS: ADMIN_IDS,
 
   // Store Identity
-  STORE_NAME: process.env.STORE_NAME || 'Jepirez DIGITAL',
-  STORE_USERNAME: process.env.STORE_USERNAME || 'Jepzstore_bot',
-  CHANNEL_ID: process.env.CHANNEL_ID || '-1004335640519',
-  CHANNEL_URL: process.env.CHANNEL_URL || 'https://t.me/testijepz',
-  GROUP_URL: process.env.GROUP_URL || 'https://t.me/jpzplay',
-  SUPPORT_USERNAME: process.env.SUPPORT_USERNAME || 'lipkill',
-  BANNER_URL: process.env.BANNER_URL || 'https://files.catbox.moe/rvpfk8.jpg',
+  STORE_NAME: process.env.STORE_NAME || 'Moakun Store',
+  STORE_USERNAME: process.env.STORE_USERNAME || 'moakun_bot',
+  CHANNEL_ID: process.env.CHANNEL_ID || '',
+  CHANNEL_URL: process.env.CHANNEL_URL || '',
+  GROUP_URL: process.env.GROUP_URL || '',
+  SUPPORT_USERNAME: process.env.SUPPORT_USERNAME || 'owner',
+  BANNER_URL: process.env.BANNER_URL || path.join(__dirname, 'assets', 'moakun_banner.jpg'),
 
   // CodeGatra Auto QRIS Payment Gateway
   CODEGATRA_BASE_URL: process.env.CODEGATRA_BASE_URL || 'https://pay.codegatra.com/api',
