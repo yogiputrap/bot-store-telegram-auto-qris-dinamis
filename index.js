@@ -1198,17 +1198,19 @@ bot.onText(/\/start/, async (msg) => {
     return bot.sendMessage(msg.chat.id, joinMsg, { parse_mode: 'HTML', reply_markup: sanitizeReplyMarkup({ inline_keyboard: joinButtons }) });
   }
 
-  // Efek animasi Dice Roll 🎲 saat /start, lalu hapus saat animasi selesai agar smooth
+  // Animasi Smooth Loading Transition saat /start (Dapat Dihapus 100% Tanpa Sisa)
   try {
-    const diceMsg = await bot.sendDice(msg.chat.id, { emoji: '🎲' });
-    await new Promise(resolve => setTimeout(resolve, 2400));
-    try {
-      await bot.deleteMessage(msg.chat.id, diceMsg.message_id);
-    } catch (delErr) {
-      console.error('Failed to delete dice message:', delErr.message);
-    }
+    const loadingMsg = await bot.sendMessage(msg.chat.id, '🎲 <i>Mengocok angka keberuntungan...</i>\n<code>[ ▰▰▰▱▱▱▱▱▱▱ ] 30%</code>', { parse_mode: 'HTML' });
+    await new Promise(r => setTimeout(r, 600));
+    await bot.editMessageText('✨ <i>Menyiapkan Dashboard Store...</i>\n<code>[ ▰▰▰▰▰▰▰▰▰▰ ] 100%</code>', {
+      chat_id: msg.chat.id,
+      message_id: loadingMsg.message_id,
+      parse_mode: 'HTML'
+    }).catch(() => {});
+    await new Promise(r => setTimeout(r, 500));
+    await bot.deleteMessage(msg.chat.id, loadingMsg.message_id).catch(() => {});
   } catch (err) {
-    console.error('Error sending dice roll:', err.message);
+    console.error('Error during loading animation:', err.message);
   }
 
   await sendStartDashboard(msg.chat.id, user);
