@@ -30,6 +30,15 @@ try {
 const bot = new TelegramBot(config.BOT_TOKEN, { polling: true });
 const userStates = {};
 
+// GLOBAL ERROR BOUNDARY TO PREVENT PROCESS CRASH
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[UNHANDLED REJECTION]:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('[UNCAUGHT EXCEPTION]:', err);
+});
+
 const formatRupiah = (num) => {
   const val = Number(num);
   const cleanVal = isNaN(val) ? 0 : val;
@@ -402,16 +411,29 @@ function downloadTextFile(fileId) {
 }
 
 async function registerUser(from) {
-  let user = await dbGet('SELECT * FROM users WHERE telegram_id = ?', [from.id]);
-  const role = (from.id === config.OWNER_ID || (config.ADMIN_IDS && config.ADMIN_IDS.includes(from.id))) ? 'owner' : 'user';
+  if (!from || !from.id) return null;
+  const role = (Number(from.id) === Number(config.OWNER_ID) || (config.ADMIN_IDS && config.ADMIN_IDS.map(Number).includes(Number(from.id)))) ? 'owner' : 'user';
 
-  if (!user) {
+  try {
     await dbRun(
-      'INSERT INTO users (telegram_id, username, first_name, role) VALUES (?, ?, ?, ?)',
+      `INSERT INTO users (telegram_id, username, first_name, role) 
+       VALUES (?, ?, ?, ?) 
+       ON CONFLICT(telegram_id) DO UPDATE SET 
+         username = excluded.username, 
+         first_name = excluded.first_name, 
+         role = excluded.role`,
       [from.id, from.username || '', from.first_name || '', role]
     );
-    user = await dbGet('SELECT * FROM users WHERE telegram_id = ?', [from.id]);
+  } catch (err) {
+    try {
+      await dbRun(
+        'UPDATE users SET username = ?, first_name = ?, role = ? WHERE telegram_id = ?',
+        [from.username || '', from.first_name || '', role, from.id]
+      );
+    } catch (updateErr) {}
   }
+
+  let user = await dbGet('SELECT * FROM users WHERE telegram_id = ?', [from.id]);
   return user;
 }
 
