@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const https = require('https');
 const AdmZip = require('adm-zip');
+const QRCode = require('qrcode');
 
 const config = require('./config.js');
 const {
@@ -131,6 +132,29 @@ async function editOrSendMessage(chatId, messageId, captionText, replyMarkup) {
     parse_mode: 'HTML',
     reply_markup: safeMarkup
   });
+}
+
+// RESOLVE QRIS PHOTO PAYLOAD (BUFFER OR URL)
+async function getQrPhotoPayload(paymentObj) {
+  if (!paymentObj) return null;
+  if (paymentObj.qrBuffer && Buffer.isBuffer(paymentObj.qrBuffer)) {
+    return paymentObj.qrBuffer;
+  }
+  if (paymentObj.qrImage && typeof paymentObj.qrImage === 'string') {
+    if (paymentObj.qrImage.startsWith('http')) return paymentObj.qrImage;
+    if (paymentObj.qrImage.startsWith('data:image')) {
+      return Buffer.from(paymentObj.qrImage.replace(/^data:image\/\w+;base64,/, ''), 'base64');
+    }
+    try {
+      return await QRCode.toBuffer(paymentObj.qrImage, { width: 512, margin: 2 });
+    } catch (e) {}
+  }
+  if (paymentObj.qrString && typeof paymentObj.qrString === 'string' && paymentObj.qrString.length > 5) {
+    try {
+      return await QRCode.toBuffer(paymentObj.qrString, { width: 512, margin: 2 });
+    } catch (e) {}
+  }
+  return null;
 }
 
 // RATE-LIMITED MESSAGE SENDER FOR SAFE BROADCAST (35ms delay)
@@ -1166,8 +1190,9 @@ bot.on('message', async (msg) => {
       depMsg += `⏱️ Berlaku: <b>${deposit.expiredMinutes} Menit</b>\n`;
       depMsg += `✅ Saldo akan otomatis bertambah dalam hitungan detik setelah bayar.`;
 
-      if (deposit.qrImage && deposit.qrImage.startsWith('http')) {
-        await bot.sendPhoto(chatId, deposit.qrImage, { caption: depMsg, parse_mode: 'HTML' });
+      const photoPayload = await getQrPhotoPayload(deposit);
+      if (photoPayload) {
+        await bot.sendPhoto(chatId, photoPayload, { caption: depMsg, parse_mode: 'HTML' });
       } else {
         await bot.sendMessage(chatId, depMsg, { parse_mode: 'HTML' });
       }
@@ -2262,8 +2287,9 @@ bot.on('callback_query', async (query) => {
     qrisMsg += `⏱️ Berlaku: <b>${payment.expiredMinutes} Menit</b>\n`;
     qrisMsg += `⚡ Begitu pembayaran terdeteksi, akun akan langsung otomatis dikirim ke chat ini!`;
 
-    if (payment.qrImage && payment.qrImage.startsWith('http')) {
-      await bot.sendPhoto(chatId, payment.qrImage, { caption: qrisMsg, parse_mode: 'HTML' });
+    const photoPayload = await getQrPhotoPayload(payment);
+    if (photoPayload) {
+      await bot.sendPhoto(chatId, photoPayload, { caption: qrisMsg, parse_mode: 'HTML' });
     } else {
       await bot.sendMessage(chatId, qrisMsg, { parse_mode: 'HTML' });
     }

@@ -11,6 +11,7 @@
     "axios": "^1.6.8",
     "canvas": "^2.11.2",
     "node-telegram-bot-api": "^0.66.0",
+    "qrcode": "^1.5.4",
     "sqlite3": "^5.1.7"
   }
 }

@@ -105,6 +105,8 @@ class PaymentService {
       totalAmount: cgRes.total_amount,
       uniqueCode: cgRes.unique_code,
       qrImage: cgRes.qr_image,
+      qrBuffer: cgRes.qr_buffer,
+      qrString: cgRes.qr_string,
       expiredMinutes: config.CODEGATRA_EXPIRED_MINUTES || 10
     };
   }
@@ -158,6 +160,8 @@ class PaymentService {
       totalAmount: cgRes.total_amount,
       uniqueCode: cgRes.unique_code,
       qrImage: cgRes.qr_image,
+      qrBuffer: cgRes.qr_buffer,
+      qrString: cgRes.qr_string,
       expiredMinutes: config.CODEGATRA_EXPIRED_MINUTES || 10
     };
   }

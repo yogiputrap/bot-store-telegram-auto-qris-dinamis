@@ -1,4 +1,5 @@
 const axios = require('axios');
+const QRCode = require('qrcode');
 const config = require('./config.js');
 
 class CodeGatraService {
@@ -42,7 +43,7 @@ class CodeGatraService {
       if (!this.isConfigured()) {
         return {
           status: 'error',
-          message: 'CodeGatra API Key / Project belum disetting di .env. Menggunakan mode QRIS manual.'
+          message: 'CodeGatra API Key / Project belum disetting di .env.'
         };
       }
 
@@ -60,14 +61,55 @@ class CodeGatraService {
 
       // Handle both direct and enveloped responses
       const dataObj = resData.data || resData;
-      const qrImage = dataObj.qr_image || dataObj.qr_url || dataObj.qrImage || dataObj.qr;
+      const qrString = dataObj.qr_string || dataObj.qrString || dataObj.raw_qr || dataObj.qr_code || dataObj.qr || '';
+      let qrImage = dataObj.qr_image || dataObj.qr_url || dataObj.qrImage || dataObj.qr_link || dataObj.image_url || '';
       const totalAmount = Number(dataObj.total_amount || dataObj.totalAmount || dataObj.amount || amount);
       const uniqueCode = Number(dataObj.unique_code || dataObj.uniqueCode || (totalAmount - amount) || 0);
+
+      let qrBuffer = null;
+
+      // 1. Generate PNG buffer from qr_string if available
+      if (qrString && typeof qrString === 'string' && qrString.length > 5) {
+        try {
+          qrBuffer = await QRCode.toBuffer(qrString, {
+            type: 'png',
+            width: 512,
+            margin: 2,
+            color: {
+              dark: '#000000',
+              light: '#ffffff'
+            }
+          });
+        } catch (e) {
+          console.error('[QRCODE GENERATE ERROR]:', e.message);
+        }
+      }
+
+      // 2. Handle base64 Data URL in qr_image
+      if (!qrBuffer && typeof qrImage === 'string' && qrImage.startsWith('data:image')) {
+        try {
+          const base64Data = qrImage.replace(/^data:image\/\w+;base64,/, '');
+          qrBuffer = Buffer.from(base64Data, 'base64');
+        } catch (e) {}
+      }
+
+      // 3. Fallback: if qrImage looks like an EMVCo string instead of URL
+      if (!qrBuffer && typeof qrImage === 'string' && !qrImage.startsWith('http') && qrImage.length > 20) {
+        try {
+          qrBuffer = await QRCode.toBuffer(qrImage, {
+            type: 'png',
+            width: 512,
+            margin: 2
+          });
+        } catch (e) {}
+      }
 
       return {
         status: 'success',
         raw: resData,
+        qr_string: qrString,
         qr_image: qrImage,
+        qr_buffer: qrBuffer,
         total_amount: totalAmount,
         unique_code: uniqueCode,
         amount: amount,
