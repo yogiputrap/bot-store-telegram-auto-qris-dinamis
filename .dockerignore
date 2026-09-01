@@ -3,8 +3,9 @@ npm-debug.log
 .git
 .gitignore
 .env
-database/*.sqlite*
-backups/*.zip
-backups/*.csv
+# Seluruh folder database & backups dikecualikan dari image
+# Data akan disimpan di named Docker volumes, bukan di dalam image
+database/
+backups/
 .DS_Store
 *.log

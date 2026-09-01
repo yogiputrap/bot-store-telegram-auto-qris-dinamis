@@ -13,11 +13,19 @@ services:
       - NODE_ENV=production
       - TZ=Asia/Jakarta
     volumes:
-      # Persistent storage for SQLite Database and Backups in Dokploy
-      - ./database:/app/database
-      - ./backups:/app/backups
+      # Named volumes — dikelola Docker, tidak bergantung path Dokploy
+      # Data TIDAK akan hilang saat redeploy
+      - jstore_database:/app/database
+      - jstore_backups:/app/backups
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
+
+# Deklarasi named volumes (Docker simpan di /var/lib/docker/volumes/)
+volumes:
+  jstore_database:
+    driver: local
+  jstore_backups:
+    driver: local
