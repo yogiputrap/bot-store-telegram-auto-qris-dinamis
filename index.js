@@ -72,6 +72,19 @@ const formatExpiryWib = (expDate, expMinutes = 10) => {
   }).replace(':', '.');
 };
 
+function isAdmin(userOrFromId) {
+  if (!userOrFromId) return false;
+  if (typeof userOrFromId === 'object') {
+    if (userOrFromId.role === 'admin' || userOrFromId.role === 'owner') return true;
+    const tid = Number(userOrFromId.telegram_id || userOrFromId.id);
+    if (tid && (tid === Number(config.OWNER_ID) || (config.ADMIN_IDS && config.ADMIN_IDS.map(Number).includes(tid)))) return true;
+  } else {
+    const tid = Number(userOrFromId);
+    if (tid && (tid === Number(config.OWNER_ID) || (config.ADMIN_IDS && config.ADMIN_IDS.map(Number).includes(tid)))) return true;
+  }
+  return false;
+}
+
 // SANITIZE INLINE & REPLY KEYBOARDS
 function sanitizeReplyMarkup(replyMarkup) {
   if (!replyMarkup) return undefined;
