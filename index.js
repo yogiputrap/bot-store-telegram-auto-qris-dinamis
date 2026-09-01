@@ -1607,6 +1607,50 @@ bot.on('message', async (msg) => {
     }
   }
 
+  // PRIORITY 2.5: ADMIN DIRECT PIPE INPUTS (Fallback when state was not pre-set)
+  if (isAdmin(msg.from.id) && text.includes('|')) {
+    const parts = text.split('|');
+    // Pattern 1: Voucher creation -> KODE|POTONGAN|MIN_BELANJA|JUMLAH_STOK (e.g. PROMOKOK|4500|5000|5)
+    if (parts.length >= 2 && isNaN(parts[0].trim())) {
+      const code = parts[0].trim().toUpperCase();
+      const discount = parseInt(parts[1].trim());
+      if (!isNaN(discount) && discount > 0) {
+        const minSpend = parts[2] ? (parseInt(parts[2].trim()) || 0) : 0;
+        const maxUsage = parts[3] ? (parseInt(parts[3].trim()) || 0) : 0;
+
+        try {
+          await dbRun(
+            'INSERT INTO vouchers (code, discount_amount, min_spend, max_usage, used_count, status) VALUES (?, ?, ?, ?, 0, \'active\')',
+            [code, discount, minSpend, maxUsage]
+          );
+          delete userStates[chatId];
+
+          let resMsg = `✅ <b>VOUCHER BERHASIL DIBUAT</b>\n\n`;
+          resMsg += `🎟️ Kode: <code>${code}</code>\n`;
+          resMsg += `💰 Potongan: <b>${formatRupiah(discount)}</b>\n`;
+          resMsg += `🛒 Min. Belanja: <b>${formatRupiah(minSpend)}</b>\n`;
+          resMsg += `📦 Stok / Kuota: <b>${maxUsage > 0 ? `${maxUsage} Penggunaan` : 'Tanpa Batas (Unlimited)'}</b>`;
+
+          return bot.sendMessage(chatId, resMsg, { parse_mode: 'HTML' });
+        } catch (err) {
+          if (err.message && err.message.includes('UNIQUE')) {
+            return bot.sendMessage(chatId, `❌ Kode voucher <code>${code}</code> sudah ada! Gunakan kode lain.`, { parse_mode: 'HTML' });
+          }
+          return bot.sendMessage(chatId, `❌ Gagal menyimpan voucher: ${err.message}`);
+        }
+      }
+    }
+
+    // Pattern 2: Edit user balance -> TELEGRAM_ID|SALDO_BARU (e.g. 123456789|50000)
+    if (parts.length === 2 && !isNaN(parts[0].trim()) && !isNaN(parts[1].trim())) {
+      const targetId = parseInt(parts[0].trim());
+      const newBal = parseInt(parts[1].trim());
+      await dbRun('UPDATE users SET balance = ? WHERE telegram_id = ?', [newBal, targetId]);
+      delete userStates[chatId];
+      return bot.sendMessage(chatId, `✅ <b>SALDO USER BERHASIL DIUPDATE</b>\n\nUser ID: <code>${targetId}</code>\nSaldo Baru: <b>${formatRupiah(newBal)}</b>`, { parse_mode: 'HTML' });
+    }
+  }
+
   // PRIORITY 3: USER REPLY KEYBOARD ACTIONS
   if (text.includes('Katalog') || text.includes('List Produk')) {
     return renderCatalog(chatId, 1, null);
@@ -1737,6 +1781,7 @@ bot.on('message', async (msg) => {
     }
 
     if (text === '🎟️ Voucher') {
+      userStates[chatId] = { step: 'AWAITING_VOUCHER_INPUT' };
       const vouchers = await dbAll('SELECT * FROM vouchers ORDER BY id DESC LIMIT 15');
       let vMsg = `🎟️ <b>KELOLA VOUCHER TOKO</b>\n\n`;
       const vButtons = [];
@@ -1754,7 +1799,7 @@ bot.on('message', async (msg) => {
         });
       }
 
-      vMsg += `<b>Tambah Voucher Baru:</b> Klik tombol di bawah atau kirim format:\n<code>KODE|POTONGAN|MIN_BELANJA|JUMLAH_STOK</code>`;
+      vMsg += `<b>Tambah Voucher Baru:</b> Kirim langsung format:\n<code>KODE|POTONGAN|MIN_BELANJA|JUMLAH_STOK</code>\n\nContoh: <code>PROMOKOK|4500|5000|5</code>`;
       vButtons.push([{ text: '➕ Tambah Voucher Baru', callback_data: 'admin_add_voucher_prompt' }]);
 
       return bot.sendMessage(chatId, vMsg, { parse_mode: 'HTML', reply_markup: sanitizeReplyMarkup({ inline_keyboard: vButtons }) });
