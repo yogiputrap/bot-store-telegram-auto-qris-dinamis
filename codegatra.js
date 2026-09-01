@@ -57,9 +57,7 @@ class CodeGatraService {
   static generateDynamicQris(rawQr, amount) {
     let qr = (rawQr || '').trim();
     if (!qr || qr.length < 20) {
-      const storeName = config.STORE_NAME || 'Moakun Store';
-      const storeLen = String(storeName.length).padStart(2, '0');
-      qr = `00020101021226580014ID.LINKAJA.WWW01189360089801234567895204581253033605802ID59${storeLen}${storeName}6007JAKARTA6304`;
+      return null;
     }
 
     // Remove existing Tag 63 if present
@@ -94,13 +92,13 @@ class CodeGatraService {
     return qr + checksum;
   }
 
-  // POST /api/order (with automatic fallback to Dynamic QRIS engine)
+  // POST /api/order (Official CodeGatra Auto QRIS or Configured QRIS String)
   static async createOrder({ refId, amount, customerName = 'Customer', expiredMinutes = 10 }) {
     const roundedAmount = Math.round(Number(amount));
     const expMinutes = expiredMinutes || config.CODEGATRA_EXPIRED_MINUTES || 10;
     const expiredAt = new Date(Date.now() + (expMinutes * 60 * 1000));
 
-    // Path 1: CodeGatra API if configured
+    // Path 1: Official CodeGatra Payment Gateway API (100% Real Bank Scannable + Auto Polling)
     if (this.isConfigured()) {
       try {
         const client = this.getClient();
@@ -124,7 +122,7 @@ class CodeGatraService {
 
         let qrBuffer = null;
 
-        // 1. If qr_string is available, render QR buffer
+        // 1. If CodeGatra returned a raw QR string, render it into PNG Buffer
         if (qrString && typeof qrString === 'string' && qrString.length > 5 && !qrString.startsWith('http')) {
           try {
             qrBuffer = await QRCode.toBuffer(qrString, {
@@ -134,11 +132,11 @@ class CodeGatraService {
               color: { dark: '#000000', light: '#ffffff' }
             });
           } catch (e) {
-            console.error('[QRCODE GENERATE ERROR]:', e.message);
+            console.error('[CODEGATRA QR STRING RENDER ERROR]:', e.message);
           }
         }
 
-        // 2. If qr_image is base64 Data URL or raw base64
+        // 2. If CodeGatra returned a base64 Data URL or raw base64 string
         if (!qrBuffer && typeof qrImage === 'string') {
           if (qrImage.startsWith('data:image')) {
             try {
@@ -152,7 +150,7 @@ class CodeGatraService {
           }
         }
 
-        // 3. If qr_image is an HTTP/HTTPS URL, download into Buffer directly
+        // 3. If CodeGatra returned an HTTP/HTTPS image URL, download image directly into Buffer
         if (!qrBuffer && typeof qrImage === 'string' && (qrImage.startsWith('http://') || qrImage.startsWith('https://'))) {
           try {
             const dlRes = await axios.get(qrImage, {
@@ -170,7 +168,7 @@ class CodeGatraService {
           }
         }
 
-        // 4. If qr_image looks like EMVCo string
+        // 4. If qr_image is actually the EMVCo string
         if (!qrBuffer && typeof qrImage === 'string' && qrImage.length > 20 && !qrImage.startsWith('http')) {
           try {
             qrBuffer = await QRCode.toBuffer(qrImage, {
@@ -182,66 +180,69 @@ class CodeGatraService {
           } catch (e) {}
         }
 
-        // 5. Fallback: generate dynamic QRIS buffer if no buffer could be generated yet
-        if (!qrBuffer) {
-          try {
-            const dynamicQr = this.generateDynamicQris(config.QRIS_STRING, totalAmount);
-            qrString = qrString || dynamicQr;
-            qrBuffer = await QRCode.toBuffer(dynamicQr, {
-              type: 'png',
-              width: 600,
-              margin: 2,
-              color: { dark: '#000000', light: '#ffffff' }
-            });
-          } catch (e) {}
+        if (qrBuffer) {
+          return {
+            status: 'success',
+            raw: resData,
+            qr_string: qrString,
+            qr_image: qrImage,
+            qr_buffer: qrBuffer,
+            total_amount: totalAmount,
+            unique_code: uniqueCode,
+            amount: roundedAmount,
+            ref_id: refId,
+            expired_at: expiredAt
+          };
         }
 
         return {
-          status: 'success',
-          raw: resData,
-          qr_string: qrString,
-          qr_image: qrImage,
-          qr_buffer: qrBuffer,
-          total_amount: totalAmount,
-          unique_code: uniqueCode,
-          amount: roundedAmount,
-          ref_id: refId,
-          expired_at: expiredAt
+          status: 'error',
+          message: 'CodeGatra merespon tetapi data gambar/string QRIS tidak ditemukan dalam respon API.'
         };
       } catch (err) {
-        console.warn('[CODEGATRA API FALLBACK]:', err.response?.data?.message || err.message);
-        // Fall through to Built-in Dynamic QRIS engine below
+        console.error('[CODEGATRA CREATE ORDER ERROR]:', err.response?.data || err.message);
+        return {
+          status: 'error',
+          message: `Gagal membuat order di CodeGatra (${err.response?.data?.message || err.message})`
+        };
       }
     }
 
-    // Path 2: Built-in Dynamic QRIS Engine (Fallback / Standalone Mode)
-    const uniqueCode = Math.floor(Math.random() * 899) + 100;
-    const totalAmount = roundedAmount + uniqueCode;
-    const dynamicQrString = this.generateDynamicQris(config.QRIS_STRING, totalAmount);
-    let qrBuffer = null;
-    try {
-      qrBuffer = await QRCode.toBuffer(dynamicQrString, {
-        type: 'png',
-        width: 600,
-        margin: 2,
-        color: { dark: '#000000', light: '#ffffff' }
-      });
-    } catch (e) {
-      console.error('[DYNAMIC QRIS GENERATE ERROR]:', e.message);
+    // Path 2: Configured Static QRIS String in .env
+    if (config.QRIS_STRING && config.QRIS_STRING.trim().length > 20) {
+      const uniqueCode = Math.floor(Math.random() * 899) + 100;
+      const totalAmount = roundedAmount + uniqueCode;
+      const dynamicQrString = this.generateDynamicQris(config.QRIS_STRING, totalAmount);
+      if (dynamicQrString) {
+        try {
+          const qrBuffer = await QRCode.toBuffer(dynamicQrString, {
+            type: 'png',
+            width: 600,
+            margin: 2,
+            color: { dark: '#000000', light: '#ffffff' }
+          });
+          return {
+            status: 'success',
+            is_static_converted: true,
+            qr_string: dynamicQrString,
+            qr_image: '',
+            qr_buffer: qrBuffer,
+            total_amount: totalAmount,
+            unique_code: uniqueCode,
+            amount: roundedAmount,
+            ref_id: refId,
+            expired_at: expiredAt
+          };
+        } catch (e) {
+          console.error('[STATIC QRIS CONVERT ERROR]:', e.message);
+        }
+      }
     }
 
+    // Path 3: Unconfigured Gateway
     return {
-      status: 'success',
-      is_fallback: true,
-      raw: { message: 'Generated via built-in Dynamic QRIS engine' },
-      qr_string: dynamicQrString,
-      qr_image: '',
-      qr_buffer: qrBuffer,
-      total_amount: totalAmount,
-      unique_code: uniqueCode,
-      amount: roundedAmount,
-      ref_id: refId,
-      expired_at: expiredAt
+      status: 'error',
+      message: 'Payment Gateway QRIS belum dikonfigurasi. Harap isi CODEGATRA_API_KEY & CODEGATRA_NAMA_PROJECT (dari https://pay.codegatra.com) atau QRIS_STRING toko di file .env agar QRIS resmi dari bank dapat di-generate dan discan oleh aplikasi bank/e-wallet manapun.'
     };
   }
 
