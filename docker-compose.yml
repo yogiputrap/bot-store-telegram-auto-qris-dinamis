@@ -26,6 +26,6 @@ services:
 # Deklarasi named volumes (Docker simpan di /var/lib/docker/volumes/)
 volumes:
   moakun_database:
-    driver: local
+    name: moakun_database
   moakun_backups:
-    driver: local
+    name: moakun_backups
