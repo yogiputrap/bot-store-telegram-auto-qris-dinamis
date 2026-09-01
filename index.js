@@ -516,15 +516,12 @@ async function showCategoryByIndex(chatId, index, messageId = null) {
   await editOrSendMessage(chatId, messageId, caption, { inline_keyboard: inlineButtons });
 }
 
-// DASHBOARD START
+// DASHBOARD START (USER)
 async function sendStartDashboard(chatId, user) {
   const userSpent = await dbGet('SELECT SUM(amount) as s FROM orders WHERE user_id = ? AND status = \'completed\'', [user.id]);
-  const totalSold = await dbGet('SELECT COUNT(*) as c FROM orders WHERE status = \'completed\'');
-  const totalRev = await dbGet('SELECT SUM(amount) as s FROM orders WHERE status = \'completed\'');
-  const totalUsers = await dbGet('SELECT COUNT(*) as c FROM users');
 
   let text = `Halo <b>${user.first_name || 'Kak'}</b> | Open! 👏\n`;
-  text += `Selamat datang di <b>${config.STORE_NAME || 'JEPZ STORE'}</b>\n`;
+  text += `Selamat datang di <b>${config.STORE_NAME || 'Moakun Store'}</b>\n`;
   text += `${getFormattedDate()}\n\n`;
 
   text += `User Info :\n`;
@@ -533,13 +530,8 @@ async function sendStartDashboard(chatId, user) {
   text += `└ Transaksi Kamu : ${formatRupiah(userSpent ? userSpent.s : 0)}\n`;
   text += `└ Saldo Anda : <b>${formatRupiah(user.balance)}</b>\n\n`;
 
-  text += `BOT Stats :\n`;
-  text += `└ Total Terjual : ${totalSold ? totalSold.c : 0} pcs\n`;
-  text += `└ Total Omzet : ${formatRupiah(totalRev ? totalRev.s : 0)}\n`;
-  text += `└ Total User : ${totalUsers ? totalUsers.c : 0}\n\n`;
-
   text += `⚡ <b>Fitur Unggulan:</b>\n`;
-  text += `• <b>Auto QRIS 24 Jam</b> (Deposit & Order otomatis via CodeGatra)\n`;
+  text += `• <b>Auto QRIS 24 Jam</b> (Deposit & Order instan otomatis)\n`;
   text += `• <b>Virtual SMS OTP</b> (Otomatis masuk & refund jika timeout)\n`;
   text += `• <b>Klaim Voucher Diskon</b> & <b>Riwayat Akun Tersimpan</b>\n\n`;
 
@@ -552,6 +544,77 @@ async function sendStartDashboard(chatId, user) {
 
   const keyboardMarkup = await getUserReplyKeyboard();
   await bot.sendMessage(chatId, text, { parse_mode: 'HTML', ...keyboardMarkup });
+}
+
+// DASHBOARD ADMIN (OWNER / ADMIN)
+async function sendAdminDashboard(chatId, user) {
+  const totalSold = await dbGet('SELECT COUNT(*) as c FROM orders WHERE status = \'completed\'');
+  const totalRev = await dbGet('SELECT SUM(amount) as s FROM orders WHERE status = \'completed\'');
+  const totalUsers = await dbGet('SELECT COUNT(*) as c FROM users');
+  const totalStock = await dbGet('SELECT COUNT(*) as c FROM product_stock WHERE status = \'available\'');
+
+  // Top 3 Best Selling Products
+  const topProducts = await dbAll(`
+    SELECT p.category, p.name, SUM(o.qty) as sold_qty, SUM(o.amount) as total_sales
+    FROM orders o
+    JOIN products p ON o.product_id = p.id
+    WHERE o.status = 'completed'
+    GROUP BY p.id
+    ORDER BY sold_qty DESC, total_sales DESC
+    LIMIT 3
+  `);
+
+  // Top 3 Loyal Users / Spenders
+  const topUsers = await dbAll(`
+    SELECT u.username, u.first_name, u.telegram_id, COUNT(o.id) as order_count, SUM(o.amount) as total_spent
+    FROM orders o
+    JOIN users u ON o.user_id = u.id
+    WHERE o.status = 'completed'
+    GROUP BY u.id
+    ORDER BY total_spent DESC, order_count DESC
+    LIMIT 3
+  `);
+
+  let text = `👑 <b>ADMIN PANEL ${config.STORE_NAME || 'MOAKUN STORE'}</b>\n`;
+  text += `${getFormattedDate()}\n\n`;
+
+  text += `📊 <b>RINGKASAN STATISTIK TOKO:</b>\n`;
+  text += `├ 👥 Total Pengguna: <b>${totalUsers ? totalUsers.c : 0} User</b>\n`;
+  text += `├ 🛒 Total Order Selesai: <b>${totalSold ? totalSold.c : 0} Pesanan</b>\n`;
+  text += `├ 💰 Total Omzet: <b>${formatRupiah(totalRev ? totalRev.s : 0)}</b>\n`;
+  text += `└ 📦 Total Stok Ready: <b>${totalStock ? totalStock.c : 0} Account</b>\n\n`;
+
+  text += `🏆 <b>TOP 3 PRODUK TERLARIS:</b>\n`;
+  if (!topProducts || topProducts.length === 0) {
+    text += `<i>Belum ada data penjualan selesai.</i>\n\n`;
+  } else {
+    const medals = ['🥇', '🥈', '🥉'];
+    topProducts.forEach((p, idx) => {
+      text += `${medals[idx] || '•'} <b>${p.category} - ${p.name}</b>\n`;
+      text += `   └ Terjual: <b>${p.sold_qty || 1} pcs</b> | Omzet: <b>${formatRupiah(p.total_sales)}</b>\n`;
+    });
+    text += `\n`;
+  }
+
+  text += `💎 <b>TOP 3 USER PALING LOYAL (TOP SPENDER):</b>\n`;
+  if (!topUsers || topUsers.length === 0) {
+    text += `<i>Belum ada data transaksi pembeli.</i>\n\n`;
+  } else {
+    const crowns = ['🥇', '🥈', '🥉'];
+    topUsers.forEach((u, idx) => {
+      const name = u.username ? `@${u.username}` : (u.first_name || `ID ${u.telegram_id}`);
+      text += `${crowns[idx] || '•'} <b>${name}</b> (<code>${u.telegram_id}</code>)\n`;
+      text += `   └ Total Belanja: <b>${formatRupiah(u.total_spent)}</b> (${u.order_count}x order)\n`;
+    });
+    text += `\n`;
+  }
+
+  text += `Silakan pilih menu kelola toko di bawah:`;
+
+  await bot.sendMessage(chatId, text, {
+    parse_mode: 'HTML',
+    ...ADMIN_REPLY_KEYBOARD
+  });
 }
 
 // SEARCH PRODUCTS
@@ -956,7 +1019,7 @@ bot.onText(/\/admin/, async (msg) => {
     return bot.sendMessage(msg.chat.id, '⛔ <b>ACCESS DENIED</b>\n\nAnda tidak memiliki izin untuk mengakses Admin Panel.', { parse_mode: 'HTML' });
   }
 
-  bot.sendMessage(msg.chat.id, `👑 <b>ADMIN PANEL ${config.STORE_NAME}</b>\n\nSilakan pilih menu kelola toko:`, ADMIN_REPLY_KEYBOARD);
+  await sendAdminDashboard(msg.chat.id, user);
 });
 
 bot.onText(/\/addproduct/, async (msg) => {
@@ -1495,12 +1558,60 @@ bot.on('message', async (msg) => {
       const totalOmzet = await dbGet('SELECT SUM(amount) as s FROM orders WHERE status = \'completed\'');
       const totalStock = await dbGet('SELECT COUNT(*) as c FROM product_stock WHERE status = \'available\'');
 
-      let statText = `📊 <b>STATISTIK TOKO</b>\n\n`;
-      statText += `👥 Total Users: <b>${totalUsers.c}</b>\n`;
-      statText += `🛒 Total Order Selesai: <b>${totalOrders.c}</b>\n`;
-      statText += `📦 Total Stok Ready: <b>${totalStock.c} Account</b>\n`;
-      statText += `💰 Total Omzet: <b>${formatRupiah(totalOmzet ? totalOmzet.s : 0)}</b>\n\n`;
-      statText += `Klik tombol di bawah untuk mendownload Laporan CSV atau Backup database:`;
+      // Top 3 Best Selling Products
+      const topProducts = await dbAll(`
+        SELECT p.category, p.name, SUM(o.qty) as sold_qty, SUM(o.amount) as total_sales
+        FROM orders o
+        JOIN products p ON o.product_id = p.id
+        WHERE o.status = 'completed'
+        GROUP BY p.id
+        ORDER BY sold_qty DESC, total_sales DESC
+        LIMIT 3
+      `);
+
+      // Top 3 Loyal Users / Spenders
+      const topUsers = await dbAll(`
+        SELECT u.username, u.first_name, u.telegram_id, COUNT(o.id) as order_count, SUM(o.amount) as total_spent
+        FROM orders o
+        JOIN users u ON o.user_id = u.id
+        WHERE o.status = 'completed'
+        GROUP BY u.id
+        ORDER BY total_spent DESC, order_count DESC
+        LIMIT 3
+      `);
+
+      let statText = `📊 <b>STATISTIK & LAPORAN TOKO</b>\n\n`;
+      statText += `├ 👥 Total Users: <b>${totalUsers.c} User</b>\n`;
+      statText += `├ 🛒 Total Order Selesai: <b>${totalOrders.c} Pesanan</b>\n`;
+      statText += `├ 💰 Total Omzet: <b>${formatRupiah(totalOmzet ? totalOmzet.s : 0)}</b>\n`;
+      statText += `└ 📦 Total Stok Ready: <b>${totalStock.c} Account</b>\n\n`;
+
+      statText += `🏆 <b>TOP 3 PRODUK TERLARIS:</b>\n`;
+      if (!topProducts || topProducts.length === 0) {
+        statText += `<i>Belum ada data penjualan.</i>\n\n`;
+      } else {
+        const medals = ['🥇', '🥈', '🥉'];
+        topProducts.forEach((p, idx) => {
+          statText += `${medals[idx] || '•'} <b>${p.category} - ${p.name}</b>\n`;
+          statText += `   └ Terjual: <b>${p.sold_qty || 1} pcs</b> | Omzet: <b>${formatRupiah(p.total_sales)}</b>\n`;
+        });
+        statText += `\n`;
+      }
+
+      statText += `💎 <b>TOP 3 USER PALING LOYAL (TOP SPENDER):</b>\n`;
+      if (!topUsers || topUsers.length === 0) {
+        statText += `<i>Belum ada data pembeli.</i>\n\n`;
+      } else {
+        const crowns = ['🥇', '🥈', '🥉'];
+        topUsers.forEach((u, idx) => {
+          const name = u.username ? `@${u.username}` : (u.first_name || `ID ${u.telegram_id}`);
+          statText += `${crowns[idx] || '•'} <b>${name}</b> (<code>${u.telegram_id}</code>)\n`;
+          statText += `   └ Total Belanja: <b>${formatRupiah(u.total_spent)}</b> (${u.order_count}x order)\n`;
+        });
+        statText += `\n`;
+      }
+
+      statText += `Pilih aksi di bawah:`;
 
       const statButtons = [
         [{ text: '📥 Export Laporan Penjualan (CSV)', callback_data: 'admin_export_csv' }],
