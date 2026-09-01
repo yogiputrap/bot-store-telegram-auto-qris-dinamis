@@ -43,6 +43,7 @@
 * 🛡️ **Zero-Loss Data Persistence**: Menggunakan Docker Named Volumes (`moakun_database` & `moakun_backups`) yang terkunci permanen di level host, aman dari reset container maupun redeployment di Dokploy.
 * 📢 **Safe Rate-Limited Broadcast**: Sistem pengiriman pesan siaran massal dengan kontrol kecepatan antrean (25 pesan/detik) untuk melindungi bot dari hukuman *Telegram Flood Wait* / Banned.
 * ⌨️ **Persistent Menu Bar (Reply Keyboard)**: Desain UX modern di mana menu bawah Telegram tetap standby dan tidak pernah collapse atau menghilang secara tidak sengaja.
+* ✨ **Smooth Animated Loading Transition (Auto-Delete)**: Efek transisi interaktif progress bar saat user mengetik `/start` yang otomatis terhapus bersih dalam hitungan detik tanpa menyisakan sampah chat.
 
 ---
 
@@ -95,6 +96,7 @@
 | **📜 Riwayat Transaksi Digital** | Menyimpan seluruh arsip pesanan akun (*Email, Password, Extra Info, Link*) dan pesanan OTP (*Nomor HP, SMS OTP*) secara rapi dan permanen. |
 | **💰 Deposit Saldo Instan** | Top-up saldo mandiri dengan QRIS otomatis 24 Jam. Nominal unik ditambahkan dan saldo otomatis masuk dalam hitungan detik. |
 | **🛡️ Klaim Garansi Terintegrasi** | Form pengajuan garansi akun bermasalah dengan format `KODE_ORDER \| KELUHAN`. Tiket dibuat di sistem dan langsung meneruskan alert ke Telegram Owner. |
+| **✨ Smooth Animated Loader** | Animasi loading bar interaktif saat `/start` (`[ ▰▰▰▱▱▱ ] 30%` ➔ `[ ▰▰▰▰▰▰ ] 100%`) yang otomatis lenyap setelah selesai untuk pengalaman pengguna yang mulus. |
 | **📢 Channel Gate (Force Subscribe)** | Pengunjung wajib bergabung ke channel informasi toko sebelum dapat melakukan transaksi (dapat diaktifkan/dinonaktifkan). |
 
 ---
