@@ -1198,12 +1198,13 @@ bot.onText(/\/start/, async (msg) => {
     return bot.sendMessage(msg.chat.id, joinMsg, { parse_mode: 'HTML', reply_markup: sanitizeReplyMarkup({ inline_keyboard: joinButtons }) });
   }
 
-  // Efek animasi Dice Roll 🎲 saat /start
+  // Efek animasi Dice Roll 🎲 saat /start, lalu hapus saat animasi selesai agar smooth
   try {
-    await bot.sendDice(msg.chat.id, { emoji: '🎲' });
-    await new Promise(resolve => setTimeout(resolve, 2200));
+    const diceMsg = await bot.sendDice(msg.chat.id, { emoji: '🎲' });
+    await new Promise(resolve => setTimeout(resolve, 2400));
+    await bot.deleteMessage(msg.chat.id, diceMsg.message_id).catch(() => {});
   } catch (err) {
-    console.error('Error sending dice roll:', err.message);
+    console.error('Error sending/deleting dice roll:', err.message);
   }
 
   await sendStartDashboard(msg.chat.id, user);
