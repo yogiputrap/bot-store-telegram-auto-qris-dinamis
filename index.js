@@ -1202,9 +1202,13 @@ bot.onText(/\/start/, async (msg) => {
   try {
     const diceMsg = await bot.sendDice(msg.chat.id, { emoji: '🎲' });
     await new Promise(resolve => setTimeout(resolve, 2400));
-    await bot.deleteMessage(msg.chat.id, diceMsg.message_id).catch(() => {});
+    try {
+      await bot.deleteMessage(msg.chat.id, diceMsg.message_id);
+    } catch (delErr) {
+      console.error('Failed to delete dice message:', delErr.message);
+    }
   } catch (err) {
-    console.error('Error sending/deleting dice roll:', err.message);
+    console.error('Error sending dice roll:', err.message);
   }
 
   await sendStartDashboard(msg.chat.id, user);
