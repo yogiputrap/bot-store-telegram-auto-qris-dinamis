@@ -62,6 +62,16 @@ const getShortTimeString = () => {
   return `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()} • ${String(now.getHours()).padStart(2, '0')}.${String(now.getMinutes()).padStart(2, '0')} WIB`;
 };
 
+const formatExpiryWib = (expDate, expMinutes = 10) => {
+  const dateObj = expDate instanceof Date ? expDate : (expDate ? new Date(expDate) : new Date(Date.now() + (expMinutes * 60 * 1000)));
+  return dateObj.toLocaleTimeString('id-ID', {
+    timeZone: 'Asia/Jakarta',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  }).replace(':', '.');
+};
+
 // SANITIZE INLINE & REPLY KEYBOARDS
 function sanitizeReplyMarkup(replyMarkup) {
   if (!replyMarkup) return undefined;
@@ -1326,6 +1336,7 @@ bot.on('message', async (msg) => {
         return bot.sendMessage(chatId, `❌ <b>Gagal membuat deposit QRIS:</b> ${deposit.message}`, { parse_mode: 'HTML' });
       }
 
+      const expTimeFormatted = formatExpiryWib(deposit.expiredAt, deposit.expiredMinutes);
       let depMsg = `⚡ <b>DEPOSIT QRIS OTOMATIS</b>\n\n`;
       depMsg += `Kode Deposit: <code>#${deposit.depositCode}</code>\n`;
       depMsg += `Nominal: ${formatRupiah(deposit.amount)}\n`;
@@ -1333,7 +1344,7 @@ bot.on('message', async (msg) => {
       depMsg += `━━━━━━━━━━━━━━━━━━\n`;
       depMsg += `💵 <b>TOTAL TRANSFER: ${formatRupiah(deposit.totalAmount)}</b>\n`;
       depMsg += `<i>(Wajib transfer persis nominal di atas agar saldo otomatis masuk)</i>\n\n`;
-      depMsg += `⏱️ Berlaku: <b>${deposit.expiredMinutes} Menit</b>\n`;
+      depMsg += `⏱️ Berlaku: <b>${deposit.expiredMinutes} Menit</b> (s/d <b>${expTimeFormatted} WIB</b>)\n`;
       depMsg += `✅ Saldo akan otomatis bertambah dalam hitungan detik setelah bayar.`;
 
       const depButtons = {
@@ -2534,6 +2545,7 @@ bot.on('callback_query', async (query) => {
       return bot.sendMessage(chatId, `❌ <b>Gagal membuat pembayaran QRIS:</b> ${payment.message}`, { parse_mode: 'HTML' });
     }
 
+    const expTimeFormatted = formatExpiryWib(payment.expiredAt, payment.expiredMinutes);
     let qrisMsg = `⚡ <b>PEMBAYARAN QRIS OTOMATIS (${qty} Pcs)</b>\n\n`;
     qrisMsg += `Order Code: <code>#${orderCode}</code>\n`;
     qrisMsg += `Produk: <b>${product.category} - ${product.name}</b> (${qty} Pcs)\n`;
@@ -2542,7 +2554,7 @@ bot.on('callback_query', async (query) => {
     qrisMsg += `━━━━━━━━━━━━━━━━━━\n`;
     qrisMsg += `💵 <b>TOTAL TRANSFER: ${formatRupiah(payment.totalAmount)}</b>\n`;
     qrisMsg += `<i>(Wajib transfer persis ${formatRupiah(payment.totalAmount)} agar otomatis lunas)</i>\n\n`;
-    qrisMsg += `⏱️ Berlaku: <b>${payment.expiredMinutes} Menit</b>\n`;
+    qrisMsg += `⏱️ Berlaku: <b>${payment.expiredMinutes} Menit</b> (s/d <b>${expTimeFormatted} WIB</b>)\n`;
     qrisMsg += `⚡ Begitu pembayaran terdeteksi, akun akan langsung otomatis dikirim ke chat ini!`;
 
     const qrisButtons = {

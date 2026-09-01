@@ -100,7 +100,8 @@ class PaymentService {
       qrImage: cgRes.qr_image,
       qrBuffer: cgRes.qr_buffer,
       qrString: cgRes.qr_string,
-      expiredMinutes: config.CODEGATRA_EXPIRED_MINUTES || 10
+      expiredMinutes: config.CODEGATRA_EXPIRED_MINUTES || 10,
+      expiredAt: cgRes.expired_at || new Date(Date.now() + ((config.CODEGATRA_EXPIRED_MINUTES || 10) * 60 * 1000))
     };
   }
 
@@ -148,7 +149,8 @@ class PaymentService {
       qrImage: cgRes.qr_image,
       qrBuffer: cgRes.qr_buffer,
       qrString: cgRes.qr_string,
-      expiredMinutes: config.CODEGATRA_EXPIRED_MINUTES || 10
+      expiredMinutes: config.CODEGATRA_EXPIRED_MINUTES || 10,
+      expiredAt: cgRes.expired_at || new Date(Date.now() + ((config.CODEGATRA_EXPIRED_MINUTES || 10) * 60 * 1000))
     };
   }
 }
