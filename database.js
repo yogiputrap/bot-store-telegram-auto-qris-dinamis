@@ -140,6 +140,7 @@ async function initDatabase() {
       name TEXT NOT NULL,
       description TEXT,
       price INTEGER NOT NULL,
+      original_price INTEGER DEFAULT 0,
       status TEXT DEFAULT 'active',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
@@ -287,6 +288,7 @@ async function initDatabase() {
   `);
 
   // Ensure safe column migrations if existing tables were created previously
+  await ensureColumn('products', 'original_price', 'INTEGER DEFAULT 0');
   await ensureColumn('orders', 'qty', 'INTEGER DEFAULT 1');
   await ensureColumn('orders', 'gross_amount', 'INTEGER');
   await ensureColumn('orders', 'discount_amount', 'INTEGER DEFAULT 0');

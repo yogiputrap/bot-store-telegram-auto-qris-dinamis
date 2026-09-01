@@ -982,8 +982,8 @@ async function getOrCreateFlashSaleProduct(item) {
 
   if (!prod) {
     const res = await dbRun(
-      'INSERT INTO products (category, name, price, description, status) VALUES (?, ?, ?, ?, \'active\')',
-      ['⚡ FLASH SALE', item.name, item.price, `Promo Flash Sale ${item.name}. Full garansi 100%.`]
+      'INSERT INTO products (category, name, price, original_price, description, status) VALUES (?, ?, ?, ?, ?, \'active\')',
+      ['⚡ FLASH SALE', item.name, item.price, item.origPrice || 0, `Promo Flash Sale ${item.name}. Full garansi 100%.`]
     );
     prod = await dbGet('SELECT * FROM products WHERE id = ?', [res.lastID]);
   }
@@ -1013,16 +1013,23 @@ async function showFlashSale(chatId, messageId = null) {
     'LINK REDEM GEMINI 18 BULAN': 25000,
     'LEONARDO KREDIT 8500': 15000,
     'CHATGPT PLUS 1 BULAN': 55000,
-    'SPOTIFY 1 BULAN': 25000
+    'SPOTIFY 1 BULAN': 25000,
+    'YOUTUBE PREMIUM 12 BULAN': 3000
   };
 
   fsProducts.forEach((p) => {
     const key = p.name.trim().toUpperCase();
-    const origPrice = PRESET_ORIG_PRICES[key] || Math.ceil((p.price * 1.4) / 1000) * 1000;
+    let origPrice = p.original_price || PRESET_ORIG_PRICES[key] || 0;
+    if (!origPrice || origPrice <= p.price) {
+      origPrice = Math.ceil((p.price * 1.4) / 1000) * 1000;
+    }
+
+    const discountPct = Math.round(((origPrice - p.price) / origPrice) * 100);
+    const discLabel = discountPct > 0 ? ` <i>(-${discountPct}%)</i>` : '';
 
     text += `┊\n`;
     text += `┊ 🔥 <b>${p.name.toUpperCase()}</b>\n`;
-    text += `┊    ${formatRupiah(origPrice)} ➜ ${formatRupiah(p.price)}\n`;
+    text += `┊    <s>${formatRupiah(origPrice)}</s> ➜ <b>${formatRupiah(p.price)}</b>${discLabel}\n`;
   });
 
   text += `╰─────────────────✧\n\n`;
@@ -1571,8 +1578,29 @@ bot.on('message', async (msg) => {
     }
 
     if (state.step === 'ADD_PROD_NAME') {
-      userStates[chatId] = { ...state, step: 'ADD_PROD_PRICE', name: text };
-      return bot.sendMessage(chatId, `💰 <b>HARGA PRODUK</b>\n\nMasukkan harga jual angka saja (contoh: <code>15000</code>):`, {
+      if (state.category === '⚡ FLASH SALE') {
+        userStates[chatId] = { ...state, step: 'ADD_PROD_ORIG_PRICE', name: text };
+        return bot.sendMessage(chatId, `💰 <b>HARGA AWAL / CORET (NORMAL)</b>\n\nProduk: <b>${text}</b>\n\nMasukkan harga normal sebelum diskon (angka saja):\nContoh: <code>30000</code>`, {
+          parse_mode: 'HTML',
+          reply_markup: getCancelInlineKeyboard()
+        });
+      } else {
+        userStates[chatId] = { ...state, step: 'ADD_PROD_PRICE', name: text, originalPrice: 0 };
+        return bot.sendMessage(chatId, `💰 <b>HARGA PRODUK</b>\n\nMasukkan harga jual angka saja (contoh: <code>15000</code>):`, {
+          parse_mode: 'HTML',
+          reply_markup: getCancelInlineKeyboard()
+        });
+      }
+    }
+
+    if (state.step === 'ADD_PROD_ORIG_PRICE') {
+      const origPrice = parseInt(text.replace(/[^0-9]/g, ''));
+      if (isNaN(origPrice) || origPrice <= 0) {
+        return bot.sendMessage(chatId, '❌ Harga normal harus berupa angka yang valid. Coba lagi:', { reply_markup: getCancelInlineKeyboard() });
+      }
+
+      userStates[chatId] = { ...state, step: 'ADD_PROD_PRICE', originalPrice: origPrice };
+      return bot.sendMessage(chatId, `⚡ <b>HARGA PROMO FLASH SALE</b>\n\nHarga Normal: <s>${formatRupiah(origPrice)}</s>\n\nMasukkan harga promo Flash Sale (angka saja):\nContoh: <code>15000</code>`, {
         parse_mode: 'HTML',
         reply_markup: getCancelInlineKeyboard()
       });
@@ -1585,17 +1613,26 @@ bot.on('message', async (msg) => {
       }
 
       userStates[chatId] = { ...state, step: 'ADD_PROD_DESC', price };
-      return bot.sendMessage(chatId, `📝 <b>DESKRIPSI PRODUK</b>\n\nMasukkan deskripsi singkat produk:`, {
+      return bot.sendMessage(chatId, `📝 <b>DESKRIPSI PRODUK</b>\n\nMasukkan deskripsi singkat/garansi produk:`, {
         parse_mode: 'HTML',
         reply_markup: getCancelInlineKeyboard()
       });
     }
 
     if (state.step === 'ADD_PROD_DESC') {
-      const { category, name, price } = state;
-      await dbRun('INSERT INTO products (category, name, description, price) VALUES (?, ?, ?, ?)', [category, name, text, price]);
+      const { category, name, price, originalPrice } = state;
+      const finalOrigPrice = originalPrice || 0;
+      await dbRun('INSERT INTO products (category, name, description, price, original_price) VALUES (?, ?, ?, ?, ?)', [category, name, text, price, finalOrigPrice]);
       delete userStates[chatId];
-      return bot.sendMessage(chatId, `✅ <b>PRODUK BERHASIL DITAMBAHKAN</b>\n\nKategori: <b>${category}</b>\nVariasi: <b>${name}</b>\nHarga: <b>${formatRupiah(price)}</b>`, { parse_mode: 'HTML' });
+
+      let successText = `✅ <b>PRODUK BERHASIL DITAMBAHKAN</b>\n\nKategori: <b>${category}</b>\nVariasi: <b>${name}</b>\n`;
+      if (finalOrigPrice > 0) {
+        const discPct = Math.round(((finalOrigPrice - price) / finalOrigPrice) * 100);
+        successText += `Harga Awal: <s>${formatRupiah(finalOrigPrice)}</s>\nHarga Flash Sale: <b>${formatRupiah(price)}</b> (Diskon ${discPct}%)\n`;
+      } else {
+        successText += `Harga: <b>${formatRupiah(price)}</b>\n`;
+      }
+      return bot.sendMessage(chatId, successText, { parse_mode: 'HTML' });
     }
 
     if (state.step === 'AWAITING_EDIT_PRICE') {
