@@ -470,6 +470,17 @@ class CodeGatraService {
               }
               await dbRun(`UPDATE payments SET status = 'paid', confirmed_at = DATETIME('now', 'localtime') WHERE id = ?`, [pay.id]);
               await dbRun(`UPDATE orders SET status = 'completed', stock_id = ?, completed_at = DATETIME('now', 'localtime') WHERE id = ?`, [stockItems[0].id, pay.order_id]);
+
+              if (pay.voucher_code) {
+                const v = await dbGet('SELECT * FROM vouchers WHERE code = ?', [pay.voucher_code]);
+                if (v) {
+                  await dbRun(
+                    'INSERT INTO voucher_usages (voucher_id, user_id, order_code, discount_amount) VALUES (?, ?, ?, ?)',
+                    [v.id, pay.user_id, pay.order_code, pay.discount_amount || 0]
+                  );
+                  await dbRun('UPDATE vouchers SET used_count = used_count + 1 WHERE id = ?', [v.id]);
+                }
+              }
             });
 
             // Send credentials to buyer
@@ -555,7 +566,7 @@ class CodeGatraService {
 
         // 2. Check Pending Auto-QRIS Product Orders
         const pendingPayments = await dbAll(`
-          SELECT p.*, o.order_code, o.product_id, o.qty, o.amount as order_amount, u.telegram_id, u.username, pr.name as prod_name, pr.category
+          SELECT p.*, o.order_code, o.product_id, o.qty, o.amount as order_amount, o.voucher_code, o.discount_amount, u.telegram_id, u.username, pr.name as prod_name, pr.category
           FROM payments p
           JOIN orders o ON p.order_id = o.id
           JOIN products pr ON o.product_id = pr.id

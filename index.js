@@ -1531,7 +1531,7 @@ bot.on('message', async (msg) => {
     if (state.step === 'AWAITING_VOUCHER_INPUT') {
       const parts = text.split('|');
       if (parts.length < 2) {
-        return bot.sendMessage(chatId, '❌ Format salah. Gunakan format: <code>KODE | DISKON | MIN_BELANJA (opsional)</code>\nContoh: <code>HEMAT5K|5000|20000</code>', {
+        return bot.sendMessage(chatId, '❌ Format salah. Gunakan format:\n<code>KODE | POTONGAN | MIN_BELANJA | JUMLAH_STOK</code>\n\nContoh:\n<code>BOSPROMO|4500|5000|100</code>\n<i>(Min. Belanja dan Stok opsional, isi 0 jika tanpa batas)</i>', {
           parse_mode: 'HTML',
           reply_markup: getCancelInlineKeyboard()
         });
@@ -1539,12 +1539,40 @@ bot.on('message', async (msg) => {
 
       const code = parts[0].trim().toUpperCase();
       const discount = parseInt(parts[1].trim());
-      const minSpend = parts[2] ? parseInt(parts[2].trim()) : 0;
+      if (isNaN(discount) || discount < 1) {
+        return bot.sendMessage(chatId, '❌ Nominal potongan harus berupa angka valid lebih dari 0.', {
+          reply_markup: getCancelInlineKeyboard()
+        });
+      }
 
-      await dbRun('INSERT INTO vouchers (code, discount_amount, min_spend) VALUES (?, ?, ?)', [code, discount, minSpend]);
-      delete userStates[chatId];
+      const minSpend = parts[2] ? (parseInt(parts[2].trim()) || 0) : 0;
+      const maxUsage = parts[3] ? (parseInt(parts[3].trim()) || 0) : 0;
 
-      return bot.sendMessage(chatId, `✅ <b>VOUCHER BERHASIL DIBUAT</b>\n\nKode: <code>${code}</code>\nDiskon: <b>${formatRupiah(discount)}</b>\nMin. Belanja: <b>${formatRupiah(minSpend)}</b>`, { parse_mode: 'HTML' });
+      try {
+        await dbRun(
+          'INSERT INTO vouchers (code, discount_amount, min_spend, max_usage, used_count, status) VALUES (?, ?, ?, ?, 0, \'active\')',
+          [code, discount, minSpend, maxUsage]
+        );
+        delete userStates[chatId];
+
+        let resMsg = `✅ <b>VOUCHER BERHASIL DIBUAT</b>\n\n`;
+        resMsg += `🎟️ Kode: <code>${code}</code>\n`;
+        resMsg += `💰 Potongan: <b>${formatRupiah(discount)}</b>\n`;
+        resMsg += `🛒 Min. Belanja: <b>${formatRupiah(minSpend)}</b>\n`;
+        resMsg += `📦 Stok / Kuota: <b>${maxUsage > 0 ? `${maxUsage} Penggunaan` : 'Tanpa Batas (Unlimited)'}</b>`;
+
+        return bot.sendMessage(chatId, resMsg, { parse_mode: 'HTML' });
+      } catch (err) {
+        if (err.message && err.message.includes('UNIQUE')) {
+          return bot.sendMessage(chatId, `❌ Kode voucher <code>${code}</code> sudah ada! Gunakan kode lain.`, {
+            parse_mode: 'HTML',
+            reply_markup: getCancelInlineKeyboard()
+          });
+        }
+        return bot.sendMessage(chatId, `❌ Gagal menyimpan voucher: ${err.message}`, {
+          reply_markup: getCancelInlineKeyboard()
+        });
+      }
     }
 
     if (state.step === 'AWAITING_EDIT_USER_BAL') {
@@ -1709,20 +1737,24 @@ bot.on('message', async (msg) => {
     }
 
     if (text === '🎟️ Voucher') {
-      const vouchers = await dbAll('SELECT * FROM vouchers ORDER BY id DESC LIMIT 10');
+      const vouchers = await dbAll('SELECT * FROM vouchers ORDER BY id DESC LIMIT 15');
       let vMsg = `🎟️ <b>KELOLA VOUCHER TOKO</b>\n\n`;
       const vButtons = [];
 
       if (vouchers.length === 0) {
-        vMsg += `Belum ada voucher aktif.\n`;
+        vMsg += `<i>Belum ada voucher aktif.</i>\n\n`;
       } else {
         vouchers.forEach(v => {
-          vMsg += `• Kode: <code>${v.code}</code> | Diskon: <b>${formatRupiah(v.discount_amount)}</b> (Terpakai: ${v.used_count || 0}x)\n`;
+          const remainingStock = v.max_usage > 0 ? Math.max(0, v.max_usage - (v.used_count || 0)) : 'Unlimited';
+          const stockText = v.max_usage > 0 ? `${remainingStock}/${v.max_usage} Kuota` : 'Unlimited';
+          vMsg += `• Kode: <code>${v.code}</code>\n`;
+          vMsg += `   ├ Diskon: <b>${formatRupiah(v.discount_amount)}</b> (Min. Belanja: ${formatRupiah(v.min_spend || 0)})\n`;
+          vMsg += `   └ Stok: <b>${stockText}</b> (Terpakai: ${v.used_count || 0}x)\n\n`;
           vButtons.push([{ text: `🗑️ Hapus Voucher ${v.code}`, callback_data: `admin_del_voucher_${v.id}` }]);
         });
       }
 
-      vMsg += `\n<b>Tambah Voucher Baru:</b> Klik tombol di bawah atau kirim <code>KODE|POTONGAN|MIN_BELANJA</code>`;
+      vMsg += `<b>Tambah Voucher Baru:</b> Klik tombol di bawah atau kirim format:\n<code>KODE|POTONGAN|MIN_BELANJA|JUMLAH_STOK</code>`;
       vButtons.push([{ text: '➕ Tambah Voucher Baru', callback_data: 'admin_add_voucher_prompt' }]);
 
       return bot.sendMessage(chatId, vMsg, { parse_mode: 'HTML', reply_markup: sanitizeReplyMarkup({ inline_keyboard: vButtons }) });
@@ -2041,7 +2073,7 @@ bot.on('callback_query', async (query) => {
   if (data.startsWith('chk_pay_')) {
     const orderCode = data.replace('chk_pay_', '');
     const pay = await dbGet(`
-      SELECT p.*, o.order_code, o.product_id, o.qty, o.amount as order_amount, o.status as order_status, u.telegram_id, u.username, pr.name as prod_name, pr.category
+      SELECT p.*, o.order_code, o.product_id, o.qty, o.amount as order_amount, o.voucher_code, o.discount_amount, o.status as order_status, u.telegram_id, u.username, pr.name as prod_name, pr.category
       FROM payments p
       JOIN orders o ON p.order_id = o.id
       JOIN products pr ON o.product_id = pr.id
@@ -2724,7 +2756,7 @@ bot.on('callback_query', async (query) => {
 
   if (data === 'admin_add_voucher_prompt') {
     userStates[chatId] = { step: 'AWAITING_VOUCHER_INPUT' };
-    bot.sendMessage(chatId, `🎟️ <b>TAMBAH VOUCHER BARU</b>\n\nFormat:\n<code>KODE | POTONGAN | MIN_BELANJA</code>\n\nContoh:\n<code>HEMAT5K|5000|20000</code>`, {
+    bot.sendMessage(chatId, `🎟️ <b>TAMBAH VOUCHER BARU</b>\n\nFormat:\n<code>KODE | POTONGAN | MIN_BELANJA | JUMLAH_STOK</code>\n\nContoh:\n<code>BOSPROMO|4500|5000|100</code>\n\n<i>Keterangan:</i>\n• <code>KODE</code>: Kode voucher (misal: BOSPROMO)\n• <code>POTONGAN</code>: Nominal diskon Rp (misal: 4500)\n• <code>MIN_BELANJA</code>: Minimal belanja (isi 0 jika tanpa min)\n• <code>JUMLAH_STOK</code>: Kuota pemakaian (isi 0 jika unlimited)`, {
       parse_mode: 'HTML',
       reply_markup: getCancelInlineKeyboard()
     });
