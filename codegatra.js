@@ -119,8 +119,23 @@ class CodeGatraService {
         console.log('[CODEGATRA DATA KEYS]:', Object.keys(dataObj));
         console.log('[CODEGATRA DATA VALUES]:', JSON.stringify(dataObj, null, 2));
 
-        // Extract QR string (EMVCo payload / QRIS string)
-        let qrString = dataObj.qr_string
+        // Parse payment_detail (CodeGatra menyimpan QR di sini — bisa objek atau JSON string)
+        let payDetail = dataObj.payment_detail || {};
+        if (typeof payDetail === 'string') {
+          try { payDetail = JSON.parse(payDetail); } catch (e) { payDetail = {}; }
+        }
+        console.log('[CODEGATRA] payment_detail:', JSON.stringify(payDetail));
+
+        // Extract QR string (EMVCo payload / QRIS string) — cek payment_detail terlebih dahulu
+        let qrString = payDetail.qr_string
+          || payDetail.qrString
+          || payDetail.raw_qr
+          || payDetail.qr_code
+          || payDetail.qr
+          || payDetail.qris
+          || payDetail.payload
+          || payDetail.emv
+          || dataObj.qr_string
           || dataObj.qrString
           || dataObj.raw_qr
           || dataObj.qr_code
@@ -131,8 +146,16 @@ class CodeGatraService {
           || dataObj.emv
           || '';
 
-        // Extract QR image (URL, base64, or EMVCo string in image field)
-        let qrImage = dataObj.qr_image
+        // Extract QR image (URL, base64, atau EMVCo string) — cek payment_detail terlebih dahulu
+        let qrImage = payDetail.qr_image
+          || payDetail.qr_url
+          || payDetail.qrImage
+          || payDetail.qr_link
+          || payDetail.image_url
+          || payDetail.image
+          || payDetail.qris_image
+          || payDetail.qr_img
+          || dataObj.qr_image
           || dataObj.qr_url
           || dataObj.qrImage
           || dataObj.qr_link
@@ -145,7 +168,7 @@ class CodeGatraService {
         const totalAmount = Number(dataObj.total_amount || dataObj.totalAmount || dataObj.amount || amount);
         const uniqueCode = Number(dataObj.unique_code || dataObj.uniqueCode || (totalAmount - roundedAmount) || 0);
 
-        console.log('[CODEGATRA] qrString:', qrString ? qrString.substring(0, 60) + '...' : '(kosong)');
+        console.log('[CODEGATRA] qrString:', qrString ? qrString.substring(0, 80) + '...' : '(kosong)');
         console.log('[CODEGATRA] qrImage:', qrImage ? qrImage.substring(0, 120) : '(kosong)');
         console.log('[CODEGATRA] totalAmount:', totalAmount, '| uniqueCode:', uniqueCode);
 
@@ -267,10 +290,11 @@ class CodeGatraService {
           const val = typeof v === 'string' ? v.substring(0, 100) : v;
           console.error(`  ${k}: ${JSON.stringify(val)}`);
         });
+        console.error('[CODEGATRA] PAYMENT_DETAIL KEYS:', Object.keys(payDetail));
 
         return {
           status: 'error',
-          message: `CodeGatra merespon tetapi data gambar/string QRIS tidak ditemukan dalam respon API. Fields tersedia: [${Object.keys(dataObj).join(', ')}]`
+          message: `CodeGatra merespon tetapi data gambar/string QRIS tidak ditemukan. payment_detail keys: [${Object.keys(payDetail).join(', ') || 'kosong'}], Fields: [${Object.keys(dataObj).join(', ')}]`
         };
       } catch (err) {
         console.error('[CODEGATRA CREATE ORDER ERROR]:', err.response?.data || err.message);
