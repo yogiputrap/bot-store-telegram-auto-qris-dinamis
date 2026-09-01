@@ -964,6 +964,33 @@ async function showUserHistory(chatId, user, messageId = null) {
   await editOrSendMessage(chatId, messageId, text, { inline_keyboard: buttons });
 }
 
+// FLASH SALE DATA & HELPER
+const FLASH_SALE_ITEMS = [
+  { id: 1, name: 'Link Redem Gemini 3 Bulan', category: 'GEMINI AI', price: 13000, origPrice: 25000, shortLabel: 'Gemini 3B (13K)' },
+  { id: 2, name: 'Gemini Head Akun 3 Bulan', category: 'GEMINI AI', price: 35000, origPrice: 45000, shortLabel: 'Gemini Head (35K)' },
+  { id: 3, name: 'CapCut Pro 1 Bulan', category: 'CAPCUT PRO', price: 25000, origPrice: 35000, shortLabel: 'CapCut Pro 1B (25K)' },
+  { id: 4, name: 'Link Redem Gemini 18 Bulan', category: 'GEMINI AI', price: 15000, origPrice: 25000, shortLabel: 'Gemini 18B (15K)' },
+  { id: 5, name: 'Leonardo Kredit 8500', category: 'LEONARDO AI', price: 10000, origPrice: 15000, shortLabel: 'Leonardo 8.5K (10K)' },
+  { id: 6, name: 'ChatGPT Plus 1 Bulan', category: 'CHATGPT+', price: 45000, origPrice: 55000, shortLabel: 'ChatGPT+ 1B (45K)' },
+  { id: 7, name: 'Spotify 1 Bulan', category: 'SPOTIFY PREMIUM', price: 15000, origPrice: 25000, shortLabel: 'Spotify 1B (15K)' }
+];
+
+async function getOrCreateFlashSaleProduct(item) {
+  let prod = await dbGet('SELECT * FROM products WHERE (name LIKE ? OR name LIKE ?) AND status = \'active\' LIMIT 1', [
+    `%${item.name}%`,
+    `%${item.name.replace(/\s*\(.*?\)\s*/g, '')}%`
+  ]);
+
+  if (!prod) {
+    const res = await dbRun(
+      'INSERT INTO products (category, name, price, description, status) VALUES (?, ?, ?, ?, \'active\')',
+      [item.category, item.name, item.price, `Promo Flash Sale ${item.name}. Full garansi 100%.`]
+    );
+    prod = await dbGet('SELECT * FROM products WHERE id = ?', [res.lastID]);
+  }
+  return prod;
+}
+
 // FLASH SALE SCREEN
 async function showFlashSale(chatId, messageId = null) {
   let text = `┊ ⚡ <b>FLASH SALE</b> ⚡\n`;
@@ -989,10 +1016,27 @@ async function showFlashSale(chatId, messageId = null) {
   text += `┊ 🔥 <b>Spotify 1 Bulan</b>\n`;
   text += `┊    Rp25.000 ➜ Rp15.000\n`;
   text += `╰─────────────────✧\n\n`;
-  text += `<i>⚠️ Stok terbatas! Segera pesan sebelum kehabisan.</i>`;
+  text += `<i>⚠️ Stok terbatas! Klik produk di bawah untuk langsung beli:</i>`;
 
   const buttons = [
-    [{ text: '🛒 Beli di Katalog', callback_data: 'cat_page_1' }]
+    [
+      { text: '🔥 [1] Gemini 3B (13K)', callback_data: 'fs_buy_1' },
+      { text: '🔥 [2] Gemini Head (35K)', callback_data: 'fs_buy_2' }
+    ],
+    [
+      { text: '🔥 [3] CapCut Pro 1B (25K)', callback_data: 'fs_buy_3' },
+      { text: '🔥 [4] Gemini 18B (15K)', callback_data: 'fs_buy_4' }
+    ],
+    [
+      { text: '🔥 [5] Leonardo 8.5K (10K)', callback_data: 'fs_buy_5' },
+      { text: '🔥 [6] ChatGPT+ 1B (45K)', callback_data: 'fs_buy_6' }
+    ],
+    [
+      { text: '🔥 [7] Spotify 1B (15K)', callback_data: 'fs_buy_7' }
+    ],
+    [
+      { text: '🔙 Kembali ke Katalog', callback_data: 'cat_page_1' }
+    ]
   ];
 
   await editOrSendMessage(chatId, messageId, text, { inline_keyboard: buttons });
@@ -2118,6 +2162,37 @@ bot.on('callback_query', async (query) => {
   if (data === 'show_flash_sale') {
     bot.answerCallbackQuery(query.id);
     return showFlashSale(chatId, messageId);
+  }
+
+  if (data.startsWith('fs_buy_')) {
+    const fsIndex = parseInt(data.split('_')[2]) - 1;
+    const fsItem = FLASH_SALE_ITEMS[fsIndex];
+    if (fsItem) {
+      bot.answerCallbackQuery(query.id, { text: `Memuat ${fsItem.name}...` });
+      const product = await getOrCreateFlashSaleProduct(fsItem);
+      const stock = await dbGet('SELECT COUNT(*) as count FROM product_stock WHERE product_id = ? AND status = \'available\'', [product.id]);
+
+      let text = `🛒 <b>DETAIL VARIASI PRODUK (FLASH SALE)</b>\n`;
+      text += `━━━━━━━━━━━━━━━━━━━━━━\n`;
+      text += `🏷️ <b>Kategori:</b> ${product.category}\n`;
+      text += `📦 <b>Variasi:</b> ${product.name}\n`;
+      text += `💰 <b>Harga Flash Sale:</b> <b>${formatRupiah(product.price)}</b> <s>${formatRupiah(fsItem.origPrice)}</s>\n`;
+      text += `📊 <b>Stok Tersedia:</b> <b>${stock.count > 0 ? '🟢 ' + stock.count + ' Akun' : '🔴 Habis'}</b>\n`;
+      text += `━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+      text += `📝 <b>Keterangan:</b>\n<i>${product.description || 'Full akses garansi 100%'}</i>\n\n`;
+      text += `⚡ <i>Pesanan akan langsung diproses dan dikirim otomatis 24 Jam.</i>`;
+
+      const buttons = [];
+      if (stock.count > 0) {
+        buttons.push([{ text: `🛒 Beli 1 Pcs (${formatRupiah(product.price)})`, callback_data: `buy_choose_${product.id}_1` }]);
+        buttons.push([{ text: '📦 Beli Grosir / Banyak', callback_data: `buy_bulk_prompt_${product.id}` }]);
+      } else {
+        buttons.push([{ text: '🔴 STOK HABIS (Hubungi Admin)', callback_data: 'noop' }]);
+      }
+      buttons.push([{ text: '🔙 Kembali ke Flash Sale', callback_data: 'show_flash_sale' }]);
+
+      return editOrSendMessage(chatId, messageId, text, { inline_keyboard: buttons });
+    }
   }
 
   if (data === 'deposit_prompt') {
