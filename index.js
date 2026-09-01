@@ -736,6 +736,13 @@ async function renderOtpServicesMenu(chatId, messageId = null, page = 1) {
   await editOrSendMessage(chatId, messageId, text, { inline_keyboard: buttons });
 }
 
+// CANCEL HELPER
+function getCancelInlineKeyboard() {
+  return sanitizeReplyMarkup({
+    inline_keyboard: [[{ text: '🔙 Batal / Kembali', callback_data: 'cancel_state' }]]
+  });
+}
+
 // TELEGRAM COMMAND LISTENERS
 bot.onText(/\/start/, async (msg) => {
   const user = await registerUser(msg.from);
@@ -782,6 +789,7 @@ bot.onText(/\/(stok|stock|katalog)/, async (msg) => {
 
 bot.onText(/\/saldo/, async (msg) => {
   const user = await registerUser(msg.from);
+  delete userStates[msg.chat.id];
   bot.sendMessage(msg.chat.id, `💰 <b>SALDO AKUN</b>\n\nSaldo Anda: <b>${formatRupiah(user.balance)}</b>`, {
     parse_mode: 'HTML',
     reply_markup: sanitizeReplyMarkup({ inline_keyboard: [[{ text: '➕ Isi Saldo (Deposit)', callback_data: 'deposit_prompt' }]] })
@@ -791,11 +799,15 @@ bot.onText(/\/saldo/, async (msg) => {
 bot.onText(/\/deposit/, async (msg) => {
   const user = await registerUser(msg.from);
   userStates[msg.chat.id] = { step: 'AWAITING_DEPOSIT_AMOUNT' };
-  bot.sendMessage(msg.chat.id, `💰 <b>DEPOSIT SALDO INSTAN</b>\n\nSaldo Anda: <b>${formatRupiah(user.balance)}</b>\nMinimal deposit: <b>${formatRupiah(config.MIN_DEPOSIT)}</b>\n\nMasukkan nominal yang ingin dideposit:`, { parse_mode: 'HTML' });
+  bot.sendMessage(msg.chat.id, `💰 <b>DEPOSIT SALDO INSTAN</b>\n\nSaldo Anda: <b>${formatRupiah(user.balance)}</b>\nMinimal deposit: <b>${formatRupiah(config.MIN_DEPOSIT)}</b>\n\nMasukkan nominal yang ingin dideposit:`, {
+    parse_mode: 'HTML',
+    reply_markup: getCancelInlineKeyboard()
+  });
 });
 
 bot.onText(/\/riwayat/, async (msg) => {
   const user = await registerUser(msg.from);
+  delete userStates[msg.chat.id];
   await showUserHistory(msg.chat.id, user, null);
 });
 
@@ -804,19 +816,27 @@ bot.onText(/\/cari(?:\s+(.+))?/, async (msg, match) => {
   const keyword = match && match[1] ? match[1].trim() : null;
   if (!keyword) {
     userStates[msg.chat.id] = { step: 'AWAITING_SEARCH_KEYWORD' };
-    return bot.sendMessage(msg.chat.id, `🔍 <b>CARI PRODUK</b>\n\nKetik nama produk atau kategori yang ingin dicari (contoh: <code>spotify</code> atau <code>canva</code>):`, { parse_mode: 'HTML' });
+    return bot.sendMessage(msg.chat.id, `🔍 <b>CARI PRODUK</b>\n\nKetik nama produk atau kategori yang ingin dicari (contoh: <code>spotify</code> atau <code>canva</code>):`, {
+      parse_mode: 'HTML',
+      reply_markup: getCancelInlineKeyboard()
+    });
   }
+  delete userStates[msg.chat.id];
   await searchProducts(msg.chat.id, keyword, null);
 });
 
 bot.onText(/\/garansi/, async (msg) => {
   const user = await registerUser(msg.from);
   userStates[msg.chat.id] = { step: 'AWAITING_WARRANTY_INPUT' };
-  bot.sendMessage(msg.chat.id, `🛡️ <b>KLAIM GARANSI PRODUK</b>\n\nFormat klaim garansi:\n<code>ORDER_CODE | KELUHAN</code>\n\nContoh:\n<code>ORD-1725000000 | Akun Canva tidak bisa login / password salah</code>`, { parse_mode: 'HTML' });
+  bot.sendMessage(msg.chat.id, `🛡️ <b>KLAIM GARANSI PRODUK</b>\n\nFormat klaim garansi:\n<code>ORDER_CODE | KELUHAN</code>\n\nContoh:\n<code>ORD-1725000000 | Akun Canva tidak bisa login / password salah</code>`, {
+    parse_mode: 'HTML',
+    reply_markup: getCancelInlineKeyboard()
+  });
 });
 
 bot.onText(/\/voucher(?:\s+(.+))?/, async (msg, match) => {
   const user = await registerUser(msg.from);
+  delete userStates[msg.chat.id];
   const code = match && match[1] ? match[1].trim() : null;
   if (!code) {
     const activeVouchers = await dbAll('SELECT * FROM vouchers WHERE status = \'active\' LIMIT 5');
@@ -842,6 +862,7 @@ bot.onText(/\/voucher(?:\s+(.+))?/, async (msg, match) => {
 
 bot.onText(/\/backup/, async (msg) => {
   const user = await registerUser(msg.from);
+  delete userStates[msg.chat.id];
   if (user.role !== 'admin' && user.role !== 'owner') return;
 
   try {
@@ -865,6 +886,7 @@ bot.onText(/\/backup/, async (msg) => {
 
 bot.onText(/\/export/, async (msg) => {
   const user = await registerUser(msg.from);
+  delete userStates[msg.chat.id];
   if (user.role !== 'admin' && user.role !== 'owner') return;
 
   try {
@@ -897,6 +919,7 @@ bot.onText(/\/export/, async (msg) => {
 
 bot.onText(/\/resetcategories/, async (msg) => {
   const user = await registerUser(msg.from);
+  delete userStates[msg.chat.id];
   if (user.role !== 'admin' && user.role !== 'owner') return;
 
   await dbRun("DELETE FROM products");
@@ -925,6 +948,7 @@ bot.onText(/\/resetcategories/, async (msg) => {
 
 bot.onText(/\/admin/, async (msg) => {
   const user = await registerUser(msg.from);
+  delete userStates[msg.chat.id];
   if (user.role !== 'admin' && user.role !== 'owner') {
     return bot.sendMessage(msg.chat.id, '⛔ <b>ACCESS DENIED</b>\n\nAnda tidak memiliki izin untuk mengakses Admin Panel.', { parse_mode: 'HTML' });
   }
@@ -937,15 +961,20 @@ bot.onText(/\/addproduct/, async (msg) => {
   if (user.role !== 'admin' && user.role !== 'owner') return;
 
   userStates[msg.chat.id] = { step: 'ADD_PROD_CAT' };
-  bot.sendMessage(msg.chat.id, `📂 <b>KATEGORI PRODUK BARU</b>\n\nMasukkan Nama Kategori / Group Produk:\nContoh: <code>SPOTIFY PREMIUM</code>`, { parse_mode: 'HTML' });
+  bot.sendMessage(msg.chat.id, `📂 <b>KATEGORI PRODUK BARU</b>\n\nMasukkan Nama Kategori / Group Produk:\nContoh: <code>SPOTIFY PREMIUM</code>`, {
+    parse_mode: 'HTML',
+    reply_markup: getCancelInlineKeyboard()
+  });
 });
 
 bot.onText(/\/addstock/, async (msg) => {
   const user = await registerUser(msg.from);
+  delete userStates[msg.chat.id];
   if (user.role !== 'admin' && user.role !== 'owner') return;
 
   const products = await dbAll('SELECT * FROM products WHERE status = \'active\'');
   const inline = products.map(p => [{ text: `${p.category} - ${p.name}`, callback_data: `admin_sel_stock_prod_${p.id}` }]);
+  inline.push([{ text: '🔙 Batal', callback_data: 'cancel_state' }]);
   bot.sendMessage(msg.chat.id, `📦 <b>TAMBAH STOCK</b>\n\nPilih produk/variasi yang ingin diisi stock:`, {
     reply_markup: sanitizeReplyMarkup({ inline_keyboard: inline })
   });
@@ -959,8 +988,25 @@ bot.on('message', async (msg) => {
   const text = msg.text.trim();
   const user = await registerUser(msg.from);
 
+  // PRIORITY 1: Check if message is a standard Reply Keyboard button or a Category Number
+  const MENU_KEYWORDS = [
+    'List Produk', 'Order OTP', 'Cek Saldo', 'Deposit', 'Riwayat Transaksi',
+    'Cari Produk', 'Klaim Voucher', 'Klaim Garansi', 'BANTUAN', 'Populer',
+    'Menu User', 'Kelola Produk', 'Laporan Stok', 'Add Product', 'Add Stock',
+    'Voucher', 'Saldo RumahOTP', 'Deposit RumahOTP', 'Pesanan App', 'Pesanan OTP',
+    'Statistik & Export', 'Status CodeGatra', 'Broadcast'
+  ];
+
+  const isMenuAction = MENU_KEYWORDS.some(k => text.includes(k)) || /^\d+$/.test(text);
+
+  if (isMenuAction) {
+    // Immediately clear conversational state so user is NEVER trapped
+    delete userStates[chatId];
+  }
+
+  // PRIORITY 2: Handle Active Conversational States (if NOT a menu button)
   const state = userStates[chatId];
-  if (state) {
+  if (state && !isMenuAction) {
     if (state.step === 'AWAITING_SEARCH_KEYWORD') {
       delete userStates[chatId];
       return searchProducts(chatId, text, null);
@@ -969,7 +1015,10 @@ bot.on('message', async (msg) => {
     if (state.step === 'AWAITING_DEPOSIT_AMOUNT') {
       const amount = parseInt(text.replace(/[^0-9]/g, ''));
       if (isNaN(amount) || amount < config.MIN_DEPOSIT) {
-        return bot.sendMessage(chatId, `❌ Nominal minimal deposit adalah <b>${formatRupiah(config.MIN_DEPOSIT)}</b>. Coba lagi:`, { parse_mode: 'HTML' });
+        return bot.sendMessage(chatId, `❌ Nominal minimal deposit adalah <b>${formatRupiah(config.MIN_DEPOSIT)}</b>. Coba lagi:`, {
+          parse_mode: 'HTML',
+          reply_markup: getCancelInlineKeyboard()
+        });
       }
 
       delete userStates[chatId];
@@ -1004,13 +1053,14 @@ bot.on('message', async (msg) => {
 
     if (state.step === 'AWAITING_CUSTOM_BUY_QTY') {
       const qty = parseInt(text.replace(/[^0-9]/g, ''));
+      const prodId = state.productId;
       if (isNaN(qty) || qty < 1) {
-        return bot.sendMessage(chatId, '❌ Jumlah pembelian minimal adalah 1 Pcs. Coba lagi:');
+        return bot.sendMessage(chatId, '❌ Jumlah pembelian minimal adalah 1 Pcs. Coba lagi:', {
+          reply_markup: sanitizeReplyMarkup({ inline_keyboard: [[{ text: '🔙 Batal', callback_data: `prod_detail_${prodId}` }]] })
+        });
       }
 
-      const prodId = state.productId;
       delete userStates[chatId];
-
       const product = await dbGet('SELECT * FROM products WHERE id = ?', [prodId]);
       return sendPaymentChoice(chatId, null, user, product, qty);
     }
@@ -1024,18 +1074,21 @@ bot.on('message', async (msg) => {
       const vCheck = await PaymentService.validateVoucher(dbGet, text, user.id, grossAmount);
 
       if (!vCheck.valid) {
-        bot.sendMessage(chatId, `❌ <b>Voucher Gagal:</b> ${vCheck.message}`);
+        bot.sendMessage(chatId, `❌ <b>Voucher Gagal:</b> ${vCheck.message}`, { parse_mode: 'HTML' });
         return sendPaymentChoice(chatId, null, user, product, qty, null);
       }
 
-      bot.sendMessage(chatId, `🎉 <b>VOUCHER BERHASIL DIGUNAKAN!</b>\nPotongan: <b>-${formatRupiah(vCheck.discountAmount)}</b>`);
+      bot.sendMessage(chatId, `🎉 <b>VOUCHER BERHASIL DIGUNAKAN!</b>\nPotongan: <b>-${formatRupiah(vCheck.discountAmount)}</b>`, { parse_mode: 'HTML' });
       return sendPaymentChoice(chatId, null, user, product, qty, vCheck);
     }
 
     if (state.step === 'AWAITING_WARRANTY_INPUT') {
       const parts = text.split('|');
       if (parts.length < 2) {
-        return bot.sendMessage(chatId, '❌ Format salah. Gunakan format: <code>ORDER_CODE | KELUHAN</code>');
+        return bot.sendMessage(chatId, '❌ Format salah. Gunakan format: <code>ORDER_CODE | KELUHAN</code>\n\nContoh: <code>ORD-1725000000 | Password salah</code>', {
+          parse_mode: 'HTML',
+          reply_markup: getCancelInlineKeyboard()
+        });
       }
 
       const orderCode = parts[0].trim().replace(/^#/, '');
@@ -1043,7 +1096,10 @@ bot.on('message', async (msg) => {
 
       const order = await dbGet('SELECT * FROM orders WHERE order_code = ? AND user_id = ?', [orderCode, user.id]);
       if (!order) {
-        return bot.sendMessage(chatId, '❌ Order Code tidak ditemukan dalam riwayat pesanan Anda.');
+        return bot.sendMessage(chatId, '❌ Order Code tidak ditemukan dalam riwayat pesanan Anda. Pastikan kode order sesuai.', {
+          parse_mode: 'HTML',
+          reply_markup: getCancelInlineKeyboard()
+        });
       }
 
       const ticketCode = 'TCK-' + Date.now().toString().slice(-6);
@@ -1053,7 +1109,7 @@ bot.on('message', async (msg) => {
       );
 
       delete userStates[chatId];
-      bot.sendMessage(chatId, `✅ <b>TIKET GARANSI DIBUAT</b>\n\nKode Tiket: <code>#${ticketCode}</code>\nOrder: <code>#${orderCode}</code>\nKeluhan: <i>${description}</i>\n\nAdmin akan segera meninjau garansi Anda.`);
+      bot.sendMessage(chatId, `✅ <b>TIKET GARANSI DIBUAT</b>\n\nKode Tiket: <code>#${ticketCode}</code>\nOrder: <code>#${orderCode}</code>\nKeluhan: <i>${description}</i>\n\nAdmin akan segera meninjau garansi Anda.`, { parse_mode: 'HTML' });
 
       // Notify Owner
       const alertMsg = `🛡️ <b>KLAIM GARANSI MASUK!</b>\n\nTiket: <code>#${ticketCode}</code>\nOrder: <code>#${orderCode}</code>\nUser: @${msg.from.username || 'User'} (<code>${msg.from.id}</code>)\nKeluhan:\n${description}`;
@@ -1066,7 +1122,9 @@ bot.on('message', async (msg) => {
     if (state.step === 'AWAITING_OWNER_OTP_DEP_AMOUNT') {
       const amount = parseInt(text.replace(/[^0-9]/g, ''));
       if (isNaN(amount) || amount < 10000) {
-        return bot.sendMessage(chatId, '❌ Nominal minimal deposit RumahOTP adalah Rp 10.000.');
+        return bot.sendMessage(chatId, '❌ Nominal minimal deposit RumahOTP adalah Rp 10.000.', {
+          reply_markup: getCancelInlineKeyboard()
+        });
       }
 
       delete userStates[chatId];
@@ -1087,20 +1145,31 @@ bot.on('message', async (msg) => {
 
     if (state.step === 'ADD_PROD_CAT') {
       userStates[chatId] = { step: 'ADD_PROD_NAME', category: text.toUpperCase() };
-      return bot.sendMessage(chatId, `📝 <b>NAMA VARIASI PRODUK</b>\n\nKategori: <b>${text.toUpperCase()}</b>\nMasukkan Nama Variasi Produk:\nContoh: <code>Spotify 1 Bulan Individual</code>`, { parse_mode: 'HTML' });
+      return bot.sendMessage(chatId, `📝 <b>NAMA VARIASI PRODUK</b>\n\nKategori: <b>${text.toUpperCase()}</b>\nMasukkan Nama Variasi Produk:\nContoh: <code>Spotify 1 Bulan Individual</code>`, {
+        parse_mode: 'HTML',
+        reply_markup: getCancelInlineKeyboard()
+      });
     }
 
     if (state.step === 'ADD_PROD_NAME') {
       userStates[chatId] = { ...state, step: 'ADD_PROD_PRICE', name: text };
-      return bot.sendMessage(chatId, `💰 <b>HARGA PRODUK</b>\n\nMasukkan harga jual angka saja (contoh: <code>15000</code>):`, { parse_mode: 'HTML' });
+      return bot.sendMessage(chatId, `💰 <b>HARGA PRODUK</b>\n\nMasukkan harga jual angka saja (contoh: <code>15000</code>):`, {
+        parse_mode: 'HTML',
+        reply_markup: getCancelInlineKeyboard()
+      });
     }
 
     if (state.step === 'ADD_PROD_PRICE') {
       const price = parseInt(text.replace(/[^0-9]/g, ''));
-      if (isNaN(price)) return bot.sendMessage(chatId, '❌ Harga harus berupa angka.');
+      if (isNaN(price)) {
+        return bot.sendMessage(chatId, '❌ Harga harus berupa angka.', { reply_markup: getCancelInlineKeyboard() });
+      }
 
       userStates[chatId] = { ...state, step: 'ADD_PROD_DESC', price };
-      return bot.sendMessage(chatId, `📝 <b>DESKRIPSI PRODUK</b>\n\nMasukkan deskripsi singkat produk:`, { parse_mode: 'HTML' });
+      return bot.sendMessage(chatId, `📝 <b>DESKRIPSI PRODUK</b>\n\nMasukkan deskripsi singkat produk:`, {
+        parse_mode: 'HTML',
+        reply_markup: getCancelInlineKeyboard()
+      });
     }
 
     if (state.step === 'ADD_PROD_DESC') {
@@ -1113,7 +1182,7 @@ bot.on('message', async (msg) => {
     if (state.step === 'AWAITING_EDIT_PRICE') {
       const newPrice = parseInt(text.replace(/[^0-9]/g, ''));
       if (isNaN(newPrice) || newPrice < 0) {
-        return bot.sendMessage(chatId, '❌ Harga tidak valid. Masukkan angka harga yang benar:');
+        return bot.sendMessage(chatId, '❌ Harga tidak valid. Masukkan angka harga yang benar:', { reply_markup: getCancelInlineKeyboard() });
       }
 
       const prodId = state.productId;
@@ -1156,7 +1225,12 @@ bot.on('message', async (msg) => {
 
     if (state.step === 'AWAITING_VOUCHER_INPUT') {
       const parts = text.split('|');
-      if (parts.length < 2) return bot.sendMessage(chatId, '❌ Format salah. Gunakan format: <code>KODE | DISKON | MIN_BELANJA (opsional)</code>\nContoh: <code>HEMAT5K|5000|20000</code>');
+      if (parts.length < 2) {
+        return bot.sendMessage(chatId, '❌ Format salah. Gunakan format: <code>KODE | DISKON | MIN_BELANJA (opsional)</code>\nContoh: <code>HEMAT5K|5000|20000</code>', {
+          parse_mode: 'HTML',
+          reply_markup: getCancelInlineKeyboard()
+        });
+      }
 
       const code = parts[0].trim().toUpperCase();
       const discount = parseInt(parts[1].trim());
@@ -1170,7 +1244,12 @@ bot.on('message', async (msg) => {
 
     if (state.step === 'AWAITING_EDIT_USER_BAL') {
       const parts = text.split('|');
-      if (parts.length < 2) return bot.sendMessage(chatId, '❌ Format salah. Gunakan format <code>TELEGRAM_ID|SALDO_BARU</code>');
+      if (parts.length < 2) {
+        return bot.sendMessage(chatId, '❌ Format salah. Gunakan format <code>TELEGRAM_ID|SALDO_BARU</code>', {
+          parse_mode: 'HTML',
+          reply_markup: getCancelInlineKeyboard()
+        });
+      }
 
       const targetId = parseInt(parts[0].trim());
       const newBal = parseInt(parts[1].trim());
@@ -1195,14 +1274,12 @@ bot.on('message', async (msg) => {
     }
   }
 
-  // USER KEYBOARD ACTIONS
+  // PRIORITY 3: USER REPLY KEYBOARD ACTIONS
   if (text.includes('List Produk')) {
-    delete userStates[chatId];
     return renderCatalog(chatId, 1, null);
   }
 
   if (text.includes('Order OTP')) {
-    delete userStates[chatId];
     return renderOtpServicesMenu(chatId, null, 1);
   }
 
@@ -1219,7 +1296,10 @@ bot.on('message', async (msg) => {
 
   if (text.includes('Cari Produk')) {
     userStates[chatId] = { step: 'AWAITING_SEARCH_KEYWORD' };
-    return bot.sendMessage(chatId, `🔍 <b>CARI PRODUK</b>\n\nKetik nama produk atau variasi yang ingin dicari:`, { parse_mode: 'HTML' });
+    return bot.sendMessage(chatId, `🔍 <b>CARI PRODUK</b>\n\nKetik nama produk atau variasi yang ingin dicari:`, {
+      parse_mode: 'HTML',
+      reply_markup: getCancelInlineKeyboard()
+    });
   }
 
   if (text.includes('Klaim Voucher')) {
@@ -1238,7 +1318,10 @@ bot.on('message', async (msg) => {
 
   if (text.includes('Klaim Garansi')) {
     userStates[chatId] = { step: 'AWAITING_WARRANTY_INPUT' };
-    return bot.sendMessage(chatId, `🛡️ <b>KLAIM GARANSI PRODUK</b>\n\nFormat:\n<code>ORDER_CODE | KELUHAN</code>\n\nContoh:\n<code>ORD-1725000000 | Akun Spotify error tidak bisa login</code>`, { parse_mode: 'HTML' });
+    return bot.sendMessage(chatId, `🛡️ <b>KLAIM GARANSI PRODUK</b>\n\nFormat:\n<code>ORDER_CODE | KELUHAN</code>\n\nContoh:\n<code>ORD-1725000000 | Akun Spotify error tidak bisa login</code>`, {
+      parse_mode: 'HTML',
+      reply_markup: getCancelInlineKeyboard()
+    });
   }
 
   if (text === '🌐 BANTUAN') {
@@ -1257,14 +1340,17 @@ bot.on('message', async (msg) => {
 
   if (text.includes('Deposit')) {
     userStates[chatId] = { step: 'AWAITING_DEPOSIT_AMOUNT' };
-    return bot.sendMessage(chatId, `💰 <b>DEPOSIT SALDO INSTAN</b>\n\nSaldo Anda saat ini: <b>${formatRupiah(user.balance)}</b>\n\nMasukkan nominal deposit (min ${formatRupiah(config.MIN_DEPOSIT)}):`, { parse_mode: 'HTML' });
+    return bot.sendMessage(chatId, `💰 <b>DEPOSIT SALDO INSTAN</b>\n\nSaldo Anda saat ini: <b>${formatRupiah(user.balance)}</b>\n\nMasukkan nominal deposit (min ${formatRupiah(config.MIN_DEPOSIT)}):`, {
+      parse_mode: 'HTML',
+      reply_markup: getCancelInlineKeyboard()
+    });
   }
 
   if (text === '🏠 Menu User') {
     return sendStartDashboard(chatId, user);
   }
 
-  // ADMIN KEYBOARD ACTIONS
+  // PRIORITY 4: ADMIN KEYBOARD ACTIONS
   if (user.role === 'admin' || user.role === 'owner') {
     if (text === '🏷️ Kelola Produk') {
       const prods = await dbAll('SELECT p.*, COUNT(s.id) as stock FROM products p LEFT JOIN product_stock s ON p.id = s.product_id AND s.status = \'available\' GROUP BY p.id');
@@ -1302,12 +1388,16 @@ bot.on('message', async (msg) => {
 
     if (text === '➕ Add Product') {
       userStates[chatId] = { step: 'ADD_PROD_CAT' };
-      return bot.sendMessage(chatId, `📂 <b>KATEGORI PRODUK BARU</b>\n\nMasukkan Nama Kategori / Group Produk:\nContoh: <code>SPOTIFY PREMIUM</code>`, { parse_mode: 'HTML' });
+      return bot.sendMessage(chatId, `📂 <b>KATEGORI PRODUK BARU</b>\n\nMasukkan Nama Kategori / Group Produk:\nContoh: <code>SPOTIFY PREMIUM</code>`, {
+        parse_mode: 'HTML',
+        reply_markup: getCancelInlineKeyboard()
+      });
     }
 
     if (text === '📥 Add Stock') {
       const products = await dbAll('SELECT * FROM products WHERE status = \'active\'');
       const inline = products.map(p => [{ text: `${p.category} - ${p.name}`, callback_data: `admin_sel_stock_prod_${p.id}` }]);
+      inline.push([{ text: '🔙 Batal', callback_data: 'cancel_state' }]);
       return bot.sendMessage(chatId, `📦 <b>TAMBAH STOCK</b>\n\nPilih produk/variasi yang ingin diisi stock:`, {
         reply_markup: sanitizeReplyMarkup({ inline_keyboard: inline })
       });
@@ -1366,7 +1456,10 @@ bot.on('message', async (msg) => {
 
     if (text === '➕ Deposit RumahOTP') {
       userStates[chatId] = { step: 'AWAITING_OWNER_OTP_DEP_AMOUNT' };
-      return bot.sendMessage(chatId, `💳 <b>DEPOSIT RUMAHOTP PROVIDER</b>\n\nMasukkan nominal deposit yang ingin diisi ke saldo RumahOTP:`, { parse_mode: 'HTML' });
+      return bot.sendMessage(chatId, `💳 <b>DEPOSIT RUMAHOTP PROVIDER</b>\n\nMasukkan nominal deposit yang ingin diisi ke saldo RumahOTP:`, {
+        parse_mode: 'HTML',
+        reply_markup: getCancelInlineKeyboard()
+      });
     }
 
     if (text === '🛒 Pesanan App') {
@@ -1417,10 +1510,14 @@ bot.on('message', async (msg) => {
 
     if (text === '📢 Broadcast') {
       userStates[chatId] = { step: 'AWAITING_BROADCAST_MSG' };
-      return bot.sendMessage(chatId, `📢 <b>BROADCAST PESAN AMAN</b>\n\nKirimkan teks atau foto yang ingin disiarkan ke seluruh pengguna terdaftar:`, { parse_mode: 'HTML' });
+      return bot.sendMessage(chatId, `📢 <b>BROADCAST PESAN AMAN</b>\n\nKirimkan teks atau foto yang ingin disiarkan ke seluruh pengguna terdaftar:`, {
+        parse_mode: 'HTML',
+        reply_markup: getCancelInlineKeyboard()
+      });
     }
   }
 
+  // PRIORITY 5: Category Number Selector
   if (/^\d+$/.test(text)) {
     const selectedNum = parseInt(text);
     return showCategoryByIndex(chatId, selectedNum, null);
@@ -1435,7 +1532,7 @@ bot.on('document', async (msg) => {
   if (state && state.step === 'AWAITING_STOCK_TXT') {
     const doc = msg.document;
     if (!doc.file_name.endsWith('.txt')) {
-      return bot.sendMessage(chatId, '❌ Format file harus berupa <code>.txt</code>', { parse_mode: 'HTML' });
+      return bot.sendMessage(chatId, '❌ Format file harus berupa <code>.txt</code>', { parse_mode: 'HTML', reply_markup: getCancelInlineKeyboard() });
     }
 
     try {
@@ -1529,21 +1626,36 @@ bot.on('callback_query', async (query) => {
 
   const user = await registerUser(query.from);
 
+  if (data === 'cancel_state') {
+    delete userStates[chatId];
+    bot.answerCallbackQuery(query.id, { text: 'Aksi dibatalkan' });
+    return renderCatalog(chatId, 1, messageId);
+  }
+
   if (data === 'deposit_prompt') {
     userStates[chatId] = { step: 'AWAITING_DEPOSIT_AMOUNT' };
-    bot.sendMessage(chatId, `💰 <b>DEPOSIT SALDO INSTAN</b>\n\nSaldo Anda saat ini: <b>${formatRupiah(user.balance)}</b>\n\nMasukkan nominal deposit:\nMinimal deposit: <b>${formatRupiah(config.MIN_DEPOSIT)}</b>`, { parse_mode: 'HTML' });
+    bot.sendMessage(chatId, `💰 <b>DEPOSIT SALDO INSTAN</b>\n\nSaldo Anda saat ini: <b>${formatRupiah(user.balance)}</b>\n\nMasukkan nominal deposit:\nMinimal deposit: <b>${formatRupiah(config.MIN_DEPOSIT)}</b>`, {
+      parse_mode: 'HTML',
+      reply_markup: getCancelInlineKeyboard()
+    });
     return bot.answerCallbackQuery(query.id);
   }
 
   if (data === 'search_prompt') {
     userStates[chatId] = { step: 'AWAITING_SEARCH_KEYWORD' };
-    bot.sendMessage(chatId, `🔍 <b>CARI PRODUK</b>\n\nKetik nama produk yang ingin Anda cari:`, { parse_mode: 'HTML' });
+    bot.sendMessage(chatId, `🔍 <b>CARI PRODUK</b>\n\nKetik nama produk yang ingin Anda cari:`, {
+      parse_mode: 'HTML',
+      reply_markup: getCancelInlineKeyboard()
+    });
     return bot.answerCallbackQuery(query.id);
   }
 
   if (data === 'warranty_prompt') {
     userStates[chatId] = { step: 'AWAITING_WARRANTY_INPUT' };
-    bot.sendMessage(chatId, `🛡️ <b>KLAIM GARANSI PRODUK</b>\n\nFormat klaim:\n<code>ORDER_CODE | KELUHAN</code>\n\nContoh:\n<code>ORD-1725000000 | Password akun salah</code>`, { parse_mode: 'HTML' });
+    bot.sendMessage(chatId, `🛡️ <b>KLAIM GARANSI PRODUK</b>\n\nFormat klaim:\n<code>ORDER_CODE | KELUHAN</code>\n\nContoh:\n<code>ORD-1725000000 | Password akun salah</code>`, {
+      parse_mode: 'HTML',
+      reply_markup: getCancelInlineKeyboard()
+    });
     return bot.answerCallbackQuery(query.id);
   }
 
@@ -1559,6 +1671,7 @@ bot.on('callback_query', async (query) => {
   }
 
   if (data.startsWith('cat_page_')) {
+    delete userStates[chatId];
     const page = parseInt(data.split('_')[2]);
     await renderCatalog(chatId, page, messageId);
     return bot.answerCallbackQuery(query.id);
@@ -1598,7 +1711,7 @@ bot.on('callback_query', async (query) => {
       buttons.push([{ text: `🏳️ ${c.name} (${formatRupiah(finalPrice)})`, callback_data: `oc_${idx}` }]);
     });
 
-    buttons.push([{ text: '🔙 Batal', callback_data: 'cat_page_1' }]);
+    buttons.push([{ text: '🔙 Batal', callback_data: 'cancel_state' }]);
     await editOrSendMessage(chatId, messageId, text, { inline_keyboard: buttons });
     return bot.answerCallbackQuery(query.id);
   }
@@ -1629,7 +1742,7 @@ bot.on('callback_query', async (query) => {
 
     const buttons = [
       [{ text: '💰 BAYAR DENGAN SALDO', callback_data: `opay_bal` }],
-      [{ text: '🔙 Batal', callback_data: 'cat_page_1' }]
+      [{ text: '🔙 Batal', callback_data: 'cancel_state' }]
     ];
 
     await editOrSendMessage(chatId, messageId, text, { inline_keyboard: buttons });
@@ -1736,6 +1849,7 @@ bot.on('callback_query', async (query) => {
 
   // === PRODUCT DETAIL & CHECKOUT CALLBACKS ===
   if (data.startsWith('prod_detail_')) {
+    delete userStates[chatId];
     const prodId = parseInt(data.split('_')[2]);
     const product = await dbGet('SELECT * FROM products WHERE id = ?', [prodId]);
     const stock = await dbGet('SELECT COUNT(*) as count FROM product_stock WHERE product_id = ? AND status = \'available\'', [prodId]);
@@ -1759,6 +1873,7 @@ bot.on('callback_query', async (query) => {
   }
 
   if (data.startsWith('buy_bulk_prompt_')) {
+    delete userStates[chatId];
     const prodId = parseInt(data.replace('buy_bulk_prompt_', ''));
     const product = await dbGet('SELECT * FROM products WHERE id = ?', [prodId]);
     const stock = await dbGet('SELECT COUNT(*) as count FROM product_stock WHERE product_id = ? AND status = \'available\'', [prodId]);
@@ -1788,7 +1903,10 @@ bot.on('callback_query', async (query) => {
   if (data.startsWith('buy_custom_qty_')) {
     const prodId = parseInt(data.replace('buy_custom_qty_', ''));
     userStates[chatId] = { step: 'AWAITING_CUSTOM_BUY_QTY', productId: prodId };
-    bot.sendMessage(chatId, `✏️ <b>INPUT JUMLAH GROSIR</b>\n\nKetik jumlah angka produk yang ingin dibeli:\nContoh: <code>15</code>`, { parse_mode: 'HTML' });
+    bot.sendMessage(chatId, `✏️ <b>INPUT JUMLAH GROSIR</b>\n\nKetik jumlah angka produk yang ingin dibeli:\nContoh: <code>15</code>`, {
+      parse_mode: 'HTML',
+      reply_markup: sanitizeReplyMarkup({ inline_keyboard: [[{ text: '🔙 Batal', callback_data: `prod_detail_${prodId}` }]] })
+    });
     return bot.answerCallbackQuery(query.id);
   }
 
@@ -1798,11 +1916,15 @@ bot.on('callback_query', async (query) => {
     const qty = parseInt(parts[3]) || 1;
 
     userStates[chatId] = { step: 'AWAITING_CHECKOUT_VOUCHER', productId: prodId, qty: qty };
-    bot.sendMessage(chatId, `🎟️ <b>GUNAKAN VOUCHER DISKON</b>\n\nKetik kode voucher promo Anda (contoh: <code>HEMAT5K</code>):`, { parse_mode: 'HTML' });
+    bot.sendMessage(chatId, `🎟️ <b>GUNAKAN VOUCHER DISKON</b>\n\nKetik kode voucher promo Anda (contoh: <code>HEMAT5K</code>):`, {
+      parse_mode: 'HTML',
+      reply_markup: sanitizeReplyMarkup({ inline_keyboard: [[{ text: '🔙 Batal', callback_data: `buy_choose_${prodId}_${qty}` }]] })
+    });
     return bot.answerCallbackQuery(query.id);
   }
 
   if (data.startsWith('buy_choose_')) {
+    delete userStates[chatId];
     const parts = data.split('_');
     const prodId = parseInt(parts[2]);
     const qty = parseInt(parts[3]) || 1;
@@ -1821,6 +1943,7 @@ bot.on('callback_query', async (query) => {
 
   // === PAY WITH BALANCE (ATOMIC ACID TRANSACTION) ===
   if (data.startsWith('pay_bal_')) {
+    delete userStates[chatId];
     const parts = data.split('_');
     const prodId = parseInt(parts[2]);
     const qty = parseInt(parts[3]) || 1;
@@ -1908,6 +2031,7 @@ bot.on('callback_query', async (query) => {
 
   // === PAY WITH QRIS (AUTO CODEGATRA EXCLUSIVE) ===
   if (data.startsWith('pay_qris_')) {
+    delete userStates[chatId];
     const parts = data.split('_');
     const prodId = parseInt(parts[2]);
     const qty = parseInt(parts[3]) || 1;
@@ -2014,7 +2138,8 @@ bot.on('callback_query', async (query) => {
     const prodId = parseInt(data.split('_')[4]);
     const buttons = [
       [{ text: '👤 INPUT MANUAL', callback_data: `add_stock_manual_${prodId}` }],
-      [{ text: '📄 IMPORT TXT', callback_data: `add_stock_txt_${prodId}` }]
+      [{ text: '📄 IMPORT TXT', callback_data: `add_stock_txt_${prodId}` }],
+      [{ text: '🔙 Batal', callback_data: 'cancel_state' }]
     ];
     bot.sendMessage(chatId, `📦 <b>PILIH METODE ADD STOCK</b>`, { reply_markup: sanitizeReplyMarkup({ inline_keyboard: buttons }) });
     return bot.answerCallbackQuery(query.id);
@@ -2023,14 +2148,20 @@ bot.on('callback_query', async (query) => {
   if (data.startsWith('add_stock_manual_')) {
     const prodId = parseInt(data.split('_')[3]);
     userStates[chatId] = { step: 'ADD_STOCK_MANUAL', productId: prodId };
-    bot.sendMessage(chatId, `👤 <b>INPUT STOCK MANUAL</b>\n\nKirim data akun dengan format per baris:\n<code>email|password</code> atau <code>email|password|extra</code>`, { parse_mode: 'HTML' });
+    bot.sendMessage(chatId, `👤 <b>INPUT STOCK MANUAL</b>\n\nKirim data akun dengan format per baris:\n<code>email|password</code> atau <code>email|password|extra</code>`, {
+      parse_mode: 'HTML',
+      reply_markup: getCancelInlineKeyboard()
+    });
     return bot.answerCallbackQuery(query.id);
   }
 
   if (data.startsWith('add_stock_txt_')) {
     const prodId = parseInt(data.split('_')[3]);
     userStates[chatId] = { step: 'AWAITING_STOCK_TXT', productId: prodId };
-    bot.sendMessage(chatId, `📄 <b>IMPORT STOCK VIA FILE .TXT</b>\n\nSilakan upload file <code>.txt</code> yang berisi list akun dengan format per baris:\n<code>email|password</code>`, { parse_mode: 'HTML' });
+    bot.sendMessage(chatId, `📄 <b>IMPORT STOCK VIA FILE .TXT</b>\n\nSilakan upload file <code>.txt</code> yang berisi list akun dengan format per baris:\n<code>email|password</code>`, {
+      parse_mode: 'HTML',
+      reply_markup: getCancelInlineKeyboard()
+    });
     return bot.answerCallbackQuery(query.id);
   }
 
@@ -2072,7 +2203,8 @@ bot.on('callback_query', async (query) => {
     const buttons = [
       [{ text: '✏️ Edit Harga', callback_data: `admin_edit_price_prompt_${prod.id}` }],
       [{ text: prod.status === 'active' ? '🔴 Nonaktifkan Produk' : '🟢 Aktifkan Produk', callback_data: `admin_toggle_prod_${prod.id}` }],
-      [{ text: '🗑️ Hapus Produk', callback_data: `admin_delete_prod_${prod.id}` }]
+      [{ text: '🗑️ Hapus Produk', callback_data: `admin_delete_prod_${prod.id}` }],
+      [{ text: '🔙 Kembali', callback_data: 'cancel_state' }]
     ];
 
     bot.sendMessage(chatId, text, { parse_mode: 'HTML', reply_markup: sanitizeReplyMarkup({ inline_keyboard: buttons }) });
@@ -2084,7 +2216,10 @@ bot.on('callback_query', async (query) => {
     const prod = await dbGet('SELECT * FROM products WHERE id = ?', [prodId]);
 
     userStates[chatId] = { step: 'AWAITING_EDIT_PRICE', productId: prodId };
-    bot.sendMessage(chatId, `✏️ <b>EDIT HARGA PRODUK</b>\n\nProduk: <b>${prod.category} - ${prod.name}</b>\nHarga Saat Ini: <b>${formatRupiah(prod.price)}</b>\n\nMasukkan harga baru:`, { parse_mode: 'HTML' });
+    bot.sendMessage(chatId, `✏️ <b>EDIT HARGA PRODUK</b>\n\nProduk: <b>${prod.category} - ${prod.name}</b>\nHarga Saat Ini: <b>${formatRupiah(prod.price)}</b>\n\nMasukkan harga baru:`, {
+      parse_mode: 'HTML',
+      reply_markup: getCancelInlineKeyboard()
+    });
     return bot.answerCallbackQuery(query.id);
   }
 
@@ -2107,7 +2242,10 @@ bot.on('callback_query', async (query) => {
 
   if (data === 'admin_add_voucher_prompt') {
     userStates[chatId] = { step: 'AWAITING_VOUCHER_INPUT' };
-    bot.sendMessage(chatId, `🎟️ <b>TAMBAH VOUCHER BARU</b>\n\nFormat:\n<code>KODE | POTONGAN | MIN_BELANJA</code>\n\nContoh:\n<code>HEMAT5K|5000|20000</code>`, { parse_mode: 'HTML' });
+    bot.sendMessage(chatId, `🎟️ <b>TAMBAH VOUCHER BARU</b>\n\nFormat:\n<code>KODE | POTONGAN | MIN_BELANJA</code>\n\nContoh:\n<code>HEMAT5K|5000|20000</code>`, {
+      parse_mode: 'HTML',
+      reply_markup: getCancelInlineKeyboard()
+    });
     return bot.answerCallbackQuery(query.id);
   }
 
@@ -2120,7 +2258,10 @@ bot.on('callback_query', async (query) => {
 
   if (data === 'admin_edit_user_bal_prompt') {
     userStates[chatId] = { step: 'AWAITING_EDIT_USER_BAL' };
-    bot.sendMessage(chatId, `✏️ <b>EDIT SALDO USER</b>\n\nFormat:\n<code>TELEGRAM_ID|SALDO_BARU</code>\n\nContoh: <code>123456789|50000</code>`, { parse_mode: 'HTML' });
+    bot.sendMessage(chatId, `✏️ <b>EDIT SALDO USER</b>\n\nFormat:\n<code>TELEGRAM_ID|SALDO_BARU</code>\n\nContoh: <code>123456789|50000</code>`, {
+      parse_mode: 'HTML',
+      reply_markup: getCancelInlineKeyboard()
+    });
     return bot.answerCallbackQuery(query.id);
   }
 
