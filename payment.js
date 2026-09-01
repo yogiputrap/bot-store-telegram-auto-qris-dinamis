@@ -53,18 +53,11 @@ class PaymentService {
     );
   }
 
-  // === PAYMENT PRODUK (AUTO QRIS CODEGATRA) ===
+  // === PAYMENT PRODUK (AUTO QRIS CODEGATRA / DYNAMIC QRIS) ===
   static async createProductPayment({ dbRun, orderCode, userId, grossAmount, discountAmount = 0, voucherCode = null, customerName = 'Customer' }) {
     const finalAmount = Math.max(100, grossAmount - discountAmount);
     const paymentCode = 'PAY-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
     const refId = 'ORD-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
-
-    if (!CodeGatraService.isConfigured()) {
-      return {
-        status: 'error',
-        message: 'Payment Gateway CodeGatra belum dikonfigurasi di file .env. Hubungi Admin/Owner.'
-      };
-    }
 
     const cgRes = await CodeGatraService.createOrder({
       refId,
@@ -73,10 +66,10 @@ class PaymentService {
       expiredMinutes: config.CODEGATRA_EXPIRED_MINUTES || 10
     });
 
-    if (cgRes.status !== 'success') {
+    if (!cgRes || cgRes.status !== 'success') {
       return {
         status: 'error',
-        message: cgRes.message || 'Gagal membuat QRIS otomatis dari payment gateway.'
+        message: cgRes?.message || 'Gagal membuat QRIS otomatis dari payment gateway.'
       };
     }
 
@@ -92,7 +85,7 @@ class PaymentService {
       finalAmount,
       cgRes.total_amount,
       cgRes.unique_code,
-      cgRes.qr_image,
+      cgRes.qr_image || cgRes.qr_string || '',
       cgRes.expired_at.toISOString()
     ]);
 
@@ -111,17 +104,10 @@ class PaymentService {
     };
   }
 
-  // === DEPOSIT SALDO (AUTO QRIS CODEGATRA) ===
+  // === DEPOSIT SALDO (AUTO QRIS CODEGATRA / DYNAMIC QRIS) ===
   static async createDeposit({ dbRun, userId, amount, customerName = 'Member' }) {
     const depositCode = 'DEP-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
     const refId = 'DEP-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
-
-    if (!CodeGatraService.isConfigured()) {
-      return {
-        status: 'error',
-        message: 'Payment Gateway CodeGatra belum dikonfigurasi di file .env. Hubungi Admin/Owner.'
-      };
-    }
 
     const cgRes = await CodeGatraService.createOrder({
       refId,
@@ -130,10 +116,10 @@ class PaymentService {
       expiredMinutes: config.CODEGATRA_EXPIRED_MINUTES || 10
     });
 
-    if (cgRes.status !== 'success') {
+    if (!cgRes || cgRes.status !== 'success') {
       return {
         status: 'error',
-        message: cgRes.message || 'Gagal membuat transaksi deposit QRIS otomatis.'
+        message: cgRes?.message || 'Gagal membuat transaksi deposit QRIS otomatis.'
       };
     }
 
@@ -148,7 +134,7 @@ class PaymentService {
       amount,
       cgRes.total_amount,
       cgRes.unique_code,
-      cgRes.qr_image,
+      cgRes.qr_image || cgRes.qr_string || '',
       cgRes.expired_at.toISOString()
     ]);
 

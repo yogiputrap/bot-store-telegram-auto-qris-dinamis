@@ -79,6 +79,8 @@ module.exports = {
   CODEGATRA_API_KEY: process.env.CODEGATRA_API_KEY || '',
   CODEGATRA_NAMA_PROJECT: process.env.CODEGATRA_NAMA_PROJECT || '',
   CODEGATRA_EXPIRED_MINUTES: parseInt(process.env.CODEGATRA_EXPIRED_MINUTES) || 10,
+  QRIS_STRING: process.env.QRIS_STRING || process.env.STATIC_QRIS || '',
+  QRIS_URL: process.env.QRIS_URL || '',
 
   // RumahOTP Virtual SMS Service
   RUMAHOTP_API_KEY: process.env.RUMAHOTP_API_KEY || 'rk-dev-4t0UxAzXvQQRXr4VIixWXUQ1AL0qU4P6',

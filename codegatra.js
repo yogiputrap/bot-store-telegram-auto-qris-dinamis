@@ -37,93 +37,212 @@ class CodeGatraService {
     }
   }
 
-  // POST /api/order
-  static async createOrder({ refId, amount, customerName = 'Customer', expiredMinutes = 10 }) {
-    try {
-      if (!this.isConfigured()) {
-        return {
-          status: 'error',
-          message: 'CodeGatra API Key / Project belum disetting di .env.'
-        };
-      }
-
-      const client = this.getClient();
-      const payload = {
-        nama_project: config.CODEGATRA_NAMA_PROJECT,
-        ref_id: refId,
-        amount: Math.round(Number(amount)),
-        customer_name: customerName,
-        expired: expiredMinutes || config.CODEGATRA_EXPIRED_MINUTES || 10
-      };
-
-      const res = await client.post('/order', payload);
-      const resData = res.data;
-      console.log('[CODEGATRA ORDER RESPONSE]:', JSON.stringify(resData));
-
-      // Handle both direct and enveloped responses
-      const dataObj = resData.data || resData;
-      const qrString = dataObj.qr_string || dataObj.qrString || dataObj.raw_qr || dataObj.qr_code || dataObj.qr || dataObj.qris_data || dataObj.qris || dataObj.payload || '';
-      let qrImage = dataObj.qr_image || dataObj.qr_url || dataObj.qrImage || dataObj.qr_link || dataObj.image_url || dataObj.image || '';
-      const totalAmount = Number(dataObj.total_amount || dataObj.totalAmount || dataObj.amount || amount);
-      const uniqueCode = Number(dataObj.unique_code || dataObj.uniqueCode || (totalAmount - amount) || 0);
-
-      let qrBuffer = null;
-
-      // 1. Generate PNG buffer from qr_string if available
-      if (qrString && typeof qrString === 'string' && qrString.length > 5) {
-        try {
-          qrBuffer = await QRCode.toBuffer(qrString, {
-            type: 'png',
-            width: 512,
-            margin: 2,
-            color: {
-              dark: '#000000',
-              light: '#ffffff'
-            }
-          });
-        } catch (e) {
-          console.error('[QRCODE GENERATE ERROR]:', e.message);
+  // Helper: Calculate CRC16 CCITT (0xFFFF, Poly 0x1021) for EMVCo QRIS
+  static crc16(str) {
+    let crc = 0xFFFF;
+    for (let i = 0; i < str.length; i++) {
+      crc ^= str.charCodeAt(i) << 8;
+      for (let j = 0; j < 8; j++) {
+        if ((crc & 0x8000) !== 0) {
+          crc = ((crc << 1) ^ 0x1021) & 0xFFFF;
+        } else {
+          crc = (crc << 1) & 0xFFFF;
         }
       }
-
-      // 2. Handle base64 Data URL in qr_image
-      if (!qrBuffer && typeof qrImage === 'string' && qrImage.startsWith('data:image')) {
-        try {
-          const base64Data = qrImage.replace(/^data:image\/\w+;base64,/, '');
-          qrBuffer = Buffer.from(base64Data, 'base64');
-        } catch (e) {}
-      }
-
-      // 3. Fallback: if qrImage looks like an EMVCo string instead of URL
-      if (!qrBuffer && typeof qrImage === 'string' && !qrImage.startsWith('http') && qrImage.length > 20) {
-        try {
-          qrBuffer = await QRCode.toBuffer(qrImage, {
-            type: 'png',
-            width: 512,
-            margin: 2
-          });
-        } catch (e) {}
-      }
-
-      return {
-        status: 'success',
-        raw: resData,
-        qr_string: qrString,
-        qr_image: qrImage,
-        qr_buffer: qrBuffer,
-        total_amount: totalAmount,
-        unique_code: uniqueCode,
-        amount: amount,
-        ref_id: refId,
-        expired_at: new Date(Date.now() + (expiredMinutes * 60 * 1000))
-      };
-    } catch (err) {
-      console.error('[CODEGATRA CREATE ORDER ERROR]:', err.response?.data || err.message);
-      return {
-        status: 'error',
-        message: err.response?.data?.message || err.message
-      };
     }
+    return crc.toString(16).toUpperCase().padStart(4, '0');
+  }
+
+  // Helper: Generate or Convert to Dynamic QRIS with exact amount
+  static generateDynamicQris(rawQr, amount) {
+    let qr = (rawQr || '').trim();
+    if (!qr || qr.length < 20) {
+      const storeName = config.STORE_NAME || 'Moakun Store';
+      const storeLen = String(storeName.length).padStart(2, '0');
+      qr = `00020101021226580014ID.LINKAJA.WWW01189360089801234567895204581253033605802ID59${storeLen}${storeName}6007JAKARTA6304`;
+    }
+
+    // Remove existing Tag 63 if present
+    if (qr.includes('6304')) {
+      qr = qr.substring(0, qr.indexOf('6304'));
+    }
+
+    // Change Tag 01 from 11 (Static) to 12 (Dynamic)
+    qr = qr.replace('010211', '010212');
+
+    // Remove existing Tag 54 if present
+    const tag54Match = qr.match(/54[0-9]{2}[0-9]+/);
+    if (tag54Match) {
+      const tagLen = parseInt(qr.substr(qr.indexOf('54') + 2, 2));
+      const fullTag = qr.substr(qr.indexOf('54'), 4 + tagLen);
+      qr = qr.replace(fullTag, '');
+    }
+
+    // Inject Tag 54 with amount before Tag 58 (Country code) or at end
+    const amtStr = String(Math.round(amount));
+    const amtLen = String(amtStr.length).padStart(2, '0');
+    const tag54 = '54' + amtLen + amtStr;
+
+    if (qr.includes('5802ID')) {
+      qr = qr.replace('5802ID', tag54 + '5802ID');
+    } else {
+      qr = qr + tag54;
+    }
+
+    qr += '6304';
+    const checksum = this.crc16(qr);
+    return qr + checksum;
+  }
+
+  // POST /api/order (with automatic fallback to Dynamic QRIS engine)
+  static async createOrder({ refId, amount, customerName = 'Customer', expiredMinutes = 10 }) {
+    const roundedAmount = Math.round(Number(amount));
+    const expMinutes = expiredMinutes || config.CODEGATRA_EXPIRED_MINUTES || 10;
+    const expiredAt = new Date(Date.now() + (expMinutes * 60 * 1000));
+
+    // Path 1: CodeGatra API if configured
+    if (this.isConfigured()) {
+      try {
+        const client = this.getClient();
+        const payload = {
+          nama_project: config.CODEGATRA_NAMA_PROJECT,
+          ref_id: refId,
+          amount: roundedAmount,
+          customer_name: customerName,
+          expired: expMinutes
+        };
+
+        const res = await client.post('/order', payload);
+        const resData = res.data;
+        console.log('[CODEGATRA ORDER RESPONSE]:', JSON.stringify(resData));
+
+        const dataObj = resData.data || resData;
+        let qrString = dataObj.qr_string || dataObj.qrString || dataObj.raw_qr || dataObj.qr_code || dataObj.qr || dataObj.qris_data || dataObj.qris || dataObj.payload || '';
+        let qrImage = dataObj.qr_image || dataObj.qr_url || dataObj.qrImage || dataObj.qr_link || dataObj.image_url || dataObj.image || '';
+        const totalAmount = Number(dataObj.total_amount || dataObj.totalAmount || dataObj.amount || amount);
+        const uniqueCode = Number(dataObj.unique_code || dataObj.uniqueCode || (totalAmount - amount) || 0);
+
+        let qrBuffer = null;
+
+        // 1. If qr_string is available, render QR buffer
+        if (qrString && typeof qrString === 'string' && qrString.length > 5 && !qrString.startsWith('http')) {
+          try {
+            qrBuffer = await QRCode.toBuffer(qrString, {
+              type: 'png',
+              width: 600,
+              margin: 2,
+              color: { dark: '#000000', light: '#ffffff' }
+            });
+          } catch (e) {
+            console.error('[QRCODE GENERATE ERROR]:', e.message);
+          }
+        }
+
+        // 2. If qr_image is base64 Data URL or raw base64
+        if (!qrBuffer && typeof qrImage === 'string') {
+          if (qrImage.startsWith('data:image')) {
+            try {
+              const base64Data = qrImage.replace(/^data:image\/\w+;base64,/, '');
+              qrBuffer = Buffer.from(base64Data, 'base64');
+            } catch (e) {}
+          } else if (/^[A-Za-z0-9+/=]{100,}$/.test(qrImage.trim())) {
+            try {
+              qrBuffer = Buffer.from(qrImage.trim(), 'base64');
+            } catch (e) {}
+          }
+        }
+
+        // 3. If qr_image is an HTTP/HTTPS URL, download into Buffer directly
+        if (!qrBuffer && typeof qrImage === 'string' && (qrImage.startsWith('http://') || qrImage.startsWith('https://'))) {
+          try {
+            const dlRes = await axios.get(qrImage, {
+              responseType: 'arraybuffer',
+              timeout: 10000,
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+              }
+            });
+            if (dlRes.data && dlRes.data.length > 0) {
+              qrBuffer = Buffer.from(dlRes.data);
+            }
+          } catch (e) {
+            console.error('[CODEGATRA QR IMAGE DOWNLOAD ERROR]:', e.message);
+          }
+        }
+
+        // 4. If qr_image looks like EMVCo string
+        if (!qrBuffer && typeof qrImage === 'string' && qrImage.length > 20 && !qrImage.startsWith('http')) {
+          try {
+            qrBuffer = await QRCode.toBuffer(qrImage, {
+              type: 'png',
+              width: 600,
+              margin: 2,
+              color: { dark: '#000000', light: '#ffffff' }
+            });
+          } catch (e) {}
+        }
+
+        // 5. Fallback: generate dynamic QRIS buffer if no buffer could be generated yet
+        if (!qrBuffer) {
+          try {
+            const dynamicQr = this.generateDynamicQris(config.QRIS_STRING, totalAmount);
+            qrString = qrString || dynamicQr;
+            qrBuffer = await QRCode.toBuffer(dynamicQr, {
+              type: 'png',
+              width: 600,
+              margin: 2,
+              color: { dark: '#000000', light: '#ffffff' }
+            });
+          } catch (e) {}
+        }
+
+        return {
+          status: 'success',
+          raw: resData,
+          qr_string: qrString,
+          qr_image: qrImage,
+          qr_buffer: qrBuffer,
+          total_amount: totalAmount,
+          unique_code: uniqueCode,
+          amount: roundedAmount,
+          ref_id: refId,
+          expired_at: expiredAt
+        };
+      } catch (err) {
+        console.warn('[CODEGATRA API FALLBACK]:', err.response?.data?.message || err.message);
+        // Fall through to Built-in Dynamic QRIS engine below
+      }
+    }
+
+    // Path 2: Built-in Dynamic QRIS Engine (Fallback / Standalone Mode)
+    const uniqueCode = Math.floor(Math.random() * 899) + 100;
+    const totalAmount = roundedAmount + uniqueCode;
+    const dynamicQrString = this.generateDynamicQris(config.QRIS_STRING, totalAmount);
+    let qrBuffer = null;
+    try {
+      qrBuffer = await QRCode.toBuffer(dynamicQrString, {
+        type: 'png',
+        width: 600,
+        margin: 2,
+        color: { dark: '#000000', light: '#ffffff' }
+      });
+    } catch (e) {
+      console.error('[DYNAMIC QRIS GENERATE ERROR]:', e.message);
+    }
+
+    return {
+      status: 'success',
+      is_fallback: true,
+      raw: { message: 'Generated via built-in Dynamic QRIS engine' },
+      qr_string: dynamicQrString,
+      qr_image: '',
+      qr_buffer: qrBuffer,
+      total_amount: totalAmount,
+      unique_code: uniqueCode,
+      amount: roundedAmount,
+      ref_id: refId,
+      expired_at: expiredAt
+    };
   }
 
   // POST /api/status

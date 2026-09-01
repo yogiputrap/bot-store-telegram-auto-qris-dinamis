@@ -3,6 +3,7 @@ const TelegramBot = require('node-telegram-bot-api');
 const path = require('path');
 const fs = require('fs');
 const https = require('https');
+const axios = require('axios');
 const AdmZip = require('adm-zip');
 const QRCode = require('qrcode');
 
@@ -135,51 +136,167 @@ async function editOrSendMessage(chatId, messageId, captionText, replyMarkup) {
   });
 }
 
-// ROBUST SEND QRIS PHOTO HELPER (BUFFER, FILE, OR URL)
-async function sendQrPhotoOrMessage(chatId, paymentObj, captionText) {
-  let tempFilePath = null;
-  try {
-    let photoSource = null;
+// ROBUST RESOLVE QRIS BUFFER HELPER (BUFFER, QR_STRING, BASE64, URL, OR DYNAMIC EMVCO)
+async function resolveQrBuffer(paymentObj) {
+  if (!paymentObj) return null;
 
-    if (paymentObj && paymentObj.qrBuffer && Buffer.isBuffer(paymentObj.qrBuffer)) {
-      tempFilePath = path.join(dbDir, `temp_qr_${Date.now()}_${Math.random().toString(36).slice(2)}.png`);
-      fs.writeFileSync(tempFilePath, paymentObj.qrBuffer);
-      photoSource = tempFilePath;
-    } else if (paymentObj && paymentObj.qrString && typeof paymentObj.qrString === 'string' && paymentObj.qrString.length > 5) {
-      const buf = await QRCode.toBuffer(paymentObj.qrString, { width: 512, margin: 2 });
-      tempFilePath = path.join(dbDir, `temp_qr_${Date.now()}_${Math.random().toString(36).slice(2)}.png`);
-      fs.writeFileSync(tempFilePath, buf);
-      photoSource = tempFilePath;
-    } else if (paymentObj && paymentObj.qrImage && typeof paymentObj.qrImage === 'string') {
-      if (paymentObj.qrImage.startsWith('http')) {
-        photoSource = paymentObj.qrImage;
-      } else if (paymentObj.qrImage.startsWith('data:image')) {
-        const base64Data = paymentObj.qrImage.replace(/^data:image\/\w+;base64,/, '');
-        const buf = Buffer.from(base64Data, 'base64');
-        tempFilePath = path.join(dbDir, `temp_qr_${Date.now()}_${Math.random().toString(36).slice(2)}.png`);
-        fs.writeFileSync(tempFilePath, buf);
-        photoSource = tempFilePath;
-      } else if (paymentObj.qrImage.length > 20) {
-        const buf = await QRCode.toBuffer(paymentObj.qrImage, { width: 512, margin: 2 });
-        tempFilePath = path.join(dbDir, `temp_qr_${Date.now()}_${Math.random().toString(36).slice(2)}.png`);
-        fs.writeFileSync(tempFilePath, buf);
-        photoSource = tempFilePath;
-      }
-    }
+  // 1. Direct Buffer passed
+  if (Buffer.isBuffer(paymentObj)) return paymentObj;
 
-    if (photoSource) {
-      await bot.sendPhoto(chatId, photoSource, { caption: captionText, parse_mode: 'HTML' });
-      return;
-    }
-  } catch (err) {
-    console.error('[SEND QR PHOTO ERROR]:', err.message);
-  } finally {
-    if (tempFilePath && fs.existsSync(tempFilePath)) {
-      try { fs.unlinkSync(tempFilePath); } catch (e) {}
+  // 2. Buffer inside object
+  if (paymentObj.qrBuffer && Buffer.isBuffer(paymentObj.qrBuffer)) return paymentObj.qrBuffer;
+  if (paymentObj.qr_buffer && Buffer.isBuffer(paymentObj.qr_buffer)) return paymentObj.qr_buffer;
+
+  // 3. String candidates from object or direct string
+  const qrString = paymentObj.qrString || paymentObj.qr_string || paymentObj.raw_qr || paymentObj.qr_code || paymentObj.qris_data || paymentObj.qris || paymentObj.payload || (typeof paymentObj === 'string' && paymentObj.length > 10 && !paymentObj.startsWith('http') ? paymentObj : null);
+  let qrImage = paymentObj.qrImage || paymentObj.qr_image || paymentObj.qr_url || paymentObj.qr_link || paymentObj.image_url || paymentObj.image || (typeof paymentObj === 'string' && (paymentObj.startsWith('http') || paymentObj.startsWith('data:image')) ? paymentObj : null);
+
+  // 4. Render from qrString if present
+  if (qrString && typeof qrString === 'string' && qrString.length > 5 && !qrString.startsWith('http')) {
+    try {
+      const buf = await QRCode.toBuffer(qrString, {
+        type: 'png',
+        width: 600,
+        margin: 2,
+        color: { dark: '#000000', light: '#ffffff' }
+      });
+      if (buf && buf.length > 0) return buf;
+    } catch (e) {
+      console.error('[QRCODE STRING RENDER ERROR]:', e.message);
     }
   }
 
-  // Fallback to text message if photo could not be sent
+  // 5. Handle base64 Data URL or raw base64 string in qrImage
+  if (qrImage && typeof qrImage === 'string') {
+    if (qrImage.startsWith('data:image')) {
+      try {
+        const base64Data = qrImage.replace(/^data:image\/\w+;base64,/, '');
+        const buf = Buffer.from(base64Data, 'base64');
+        if (buf && buf.length > 0) return buf;
+      } catch (e) {}
+    } else if (/^[A-Za-z0-9+/=]{100,}$/.test(qrImage.trim())) {
+      try {
+        const buf = Buffer.from(qrImage.trim(), 'base64');
+        if (buf && buf.length > 0) return buf;
+      } catch (e) {}
+    }
+
+    // 6. Handle HTTP/HTTPS URL in qrImage - Download directly into Buffer
+    if (qrImage.startsWith('http://') || qrImage.startsWith('https://')) {
+      try {
+        const dlRes = await axios.get(qrImage, {
+          responseType: 'arraybuffer',
+          timeout: 10000,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+          }
+        });
+        if (dlRes.data && dlRes.data.length > 0) {
+          return Buffer.from(dlRes.data);
+        }
+      } catch (e) {
+        console.error('[AXIOS DOWNLOAD QR IMAGE ERROR]:', e.message);
+      }
+    }
+
+    // 7. Handle raw EMVCo string in qrImage
+    if (qrImage.length > 20 && !qrImage.startsWith('http')) {
+      try {
+        const buf = await QRCode.toBuffer(qrImage, {
+          type: 'png',
+          width: 600,
+          margin: 2,
+          color: { dark: '#000000', light: '#ffffff' }
+        });
+        if (buf && buf.length > 0) return buf;
+      } catch (e) {}
+    }
+  }
+
+  // 8. Fallback: Generate dynamic QRIS from amount/details
+  try {
+    const totalAmt = paymentObj.totalAmount || paymentObj.total_amount || paymentObj.amount || 10000;
+    const dynamicQr = CodeGatraService.generateDynamicQris(config.QRIS_STRING, totalAmt);
+    const buf = await QRCode.toBuffer(dynamicQr, {
+      type: 'png',
+      width: 600,
+      margin: 2,
+      color: { dark: '#000000', light: '#ffffff' }
+    });
+    if (buf && buf.length > 0) return buf;
+  } catch (e) {
+    console.error('[RESOLVE QR BUFFER FALLBACK ERROR]:', e.message);
+  }
+
+  return null;
+}
+
+// ROBUST SEND QRIS PHOTO HELPER (BUFFER-FIRST, MULTI-TIER FALLBACK)
+async function sendQrPhotoOrMessage(chatId, paymentObj, captionText) {
+  try {
+    const photoBuffer = await resolveQrBuffer(paymentObj);
+
+    if (photoBuffer && Buffer.isBuffer(photoBuffer)) {
+      // Telegram photo caption limit is 1024 characters
+      let caption = captionText;
+      let extraText = null;
+      if (caption.length > 1000) {
+        caption = captionText.slice(0, 1000) + '...';
+        extraText = captionText;
+      }
+
+      // Attempt 1: Send Photo with HTML Caption
+      try {
+        await bot.sendPhoto(
+          chatId,
+          photoBuffer,
+          { caption: caption, parse_mode: 'HTML' },
+          { filename: `qris_${Date.now()}.png`, contentType: 'image/png' }
+        );
+        if (extraText) {
+          await bot.sendMessage(chatId, extraText, { parse_mode: 'HTML' });
+        }
+        return;
+      } catch (sendPhotoErr) {
+        console.warn('[SEND PHOTO RETRY 1]: HTML caption failed, retrying plain text...', sendPhotoErr.message);
+
+        // Attempt 2: Strip HTML tags and send plain caption
+        const plainCaption = caption.replace(/<[^>]*>?/gm, '');
+        try {
+          await bot.sendPhoto(
+            chatId,
+            photoBuffer,
+            { caption: plainCaption },
+            { filename: `qris_${Date.now()}.png`, contentType: 'image/png' }
+          );
+          if (extraText) {
+            await bot.sendMessage(chatId, extraText, { parse_mode: 'HTML' });
+          }
+          return;
+        } catch (plainErr) {
+          console.warn('[SEND PHOTO RETRY 2]: Retrying photo without caption...', plainErr.message);
+
+          // Attempt 3: Send photo alone, then send caption text
+          try {
+            await bot.sendPhoto(
+              chatId,
+              photoBuffer,
+              {},
+              { filename: `qris_${Date.now()}.png`, contentType: 'image/png' }
+            );
+            await bot.sendMessage(chatId, captionText, { parse_mode: 'HTML' });
+            return;
+          } catch (photoOnlyErr) {
+            console.error('[SEND PHOTO RETRY 3 FAILED]:', photoOnlyErr.message);
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[SEND QR PHOTO OVERALL ERROR]:', err.message);
+  }
+
+  // Fallback to text message if photo could not be delivered
   await bot.sendMessage(chatId, captionText, { parse_mode: 'HTML' });
 }
 
@@ -1304,11 +1421,7 @@ bot.on('message', async (msg) => {
 
       let depText = `💳 <b>DEPOSIT RUMAHOTP CREATED</b>\n\nDeposit ID: <code>${res.data.id}</code>\nTotal Bayar: <b>${formatRupiah(res.data.amount)}</b>\n\nScan QRIS di bawah ini untuk menyelesaikan deposit.`;
 
-      if (res.data.qr_image) {
-        await bot.sendPhoto(chatId, res.data.qr_image, { caption: depText, parse_mode: 'HTML' });
-      } else {
-        await bot.sendMessage(chatId, depText, { parse_mode: 'HTML' });
-      }
+      await sendQrPhotoOrMessage(chatId, res.data, depText);
       return;
     }
 
