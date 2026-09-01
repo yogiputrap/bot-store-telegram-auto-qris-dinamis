@@ -645,7 +645,7 @@ async function renderCatalog(chatId, page = 1, messageId = null) {
            COUNT(s.id) as total_stock
     FROM products p
     LEFT JOIN product_stock s ON p.id = s.product_id AND s.status = 'available'
-    WHERE p.status = 'active'
+    WHERE p.status = 'active' AND p.category != '⚡ FLASH SALE'
     GROUP BY p.category
     ORDER BY CASE WHEN COUNT(s.id) > 0 THEN 0 ELSE 1 END, p.category ASC
   `;
@@ -705,7 +705,7 @@ async function renderCatalog(chatId, page = 1, messageId = null) {
 // DETAIL CATEGORY & VARIANTS
 async function showCategoryByIndex(chatId, index, messageId = null) {
   const categories = await dbAll(`
-    SELECT category FROM products WHERE status = 'active' GROUP BY category
+    SELECT category FROM products WHERE status = 'active' AND category != '⚡ FLASH SALE' GROUP BY category
     ORDER BY (SELECT COUNT(*) FROM product_stock s JOIN products p2 ON s.product_id = p2.id WHERE p2.category = products.category AND s.status = 'available') DESC, category ASC
   `);
 
@@ -995,14 +995,17 @@ async function showFlashSale(chatId, messageId = null) {
   const fsProducts = await dbAll("SELECT * FROM products WHERE category = '⚡ FLASH SALE' AND status = 'active' ORDER BY id ASC");
 
   if (fsProducts.length === 0) {
-    let emptyText = `⚡ <b>FLASH SALE</b> ⚡\n\n`;
+    let emptyText = `⚡ <b>FLASH SALE PRODUK ${config.STORE_NAME || 'MOAKUN STORE'}</b>\n`;
+    emptyText += `━━━━━━━━━━━━━━━━━━━━━━\n`;
     emptyText += `<i>Saat ini belum ada produk promo Flash Sale aktif.</i>`;
 
     const emptyButtons = [[{ text: '🔙 Kembali ke Katalog', callback_data: 'cat_page_1' }]];
     return editOrSendMessage(chatId, messageId, emptyText, { inline_keyboard: emptyButtons });
   }
 
-  let text = `⚡ <b>FLASH SALE</b> ⚡\n\n`;
+  let caption = `⚡ <b>FLASH SALE PRODUK ${config.STORE_NAME || 'MOAKUN STORE'}</b>\n`;
+  caption += `━━━━━━━━━━━━━━━━━━━━━━\n`;
+  caption += `<i>Pilih produk flash sale di bawah untuk membeli dengan harga diskon:</i>\n\n`;
 
   const PRESET_ORIG_PRICES = {
     'LINK REDEM GEMINI 3 BULAN': 25000,
@@ -1015,7 +1018,8 @@ async function showFlashSale(chatId, messageId = null) {
     'YOUTUBE PREMIUM 12 BULAN': 3000
   };
 
-  fsProducts.forEach((p) => {
+  fsProducts.forEach((p, idx) => {
+    const num = idx + 1;
     const key = p.name.trim().toUpperCase();
     let origPrice = p.original_price || PRESET_ORIG_PRICES[key] || 0;
     if (!origPrice || origPrice <= p.price) {
@@ -1025,11 +1029,13 @@ async function showFlashSale(chatId, messageId = null) {
     const discountPct = Math.round(((origPrice - p.price) / origPrice) * 100);
     const discLabel = discountPct > 0 ? ` <i>(-${discountPct}%)</i>` : '';
 
-    text += `🔥 <b>${p.name.toUpperCase()}</b>\n`;
-    text += `   <s>${formatRupiah(origPrice)}</s> ➜ <b>${formatRupiah(p.price)}</b>${discLabel}\n\n`;
+    caption += `<b>[${num}] 🔥 ${p.name.toUpperCase()}</b>\n`;
+    caption += `   └ 💰 <s>${formatRupiah(origPrice)}</s> ➜ <b>${formatRupiah(p.price)}</b>${discLabel}\n\n`;
   });
 
-  text += `<i>⚠️ Stok terbatas! Klik produk di bawah untuk langsung beli:</i>`;
+  caption += `━━━━━━━━━━━━━━━━━━━━━━\n`;
+  caption += `👉 <b>Cara Beli:</b> Klik tombol produk di bawah sebelum promo berakhir!\n`;
+  caption += `⚠️ <i>Stok terbatas! Segera pesan sebelum kehabisan.</i>`;
 
   const buttons = [];
   let currentRow = [];
@@ -1059,7 +1065,7 @@ async function showFlashSale(chatId, messageId = null) {
 
   buttons.push([{ text: '🔙 Kembali ke Katalog', callback_data: 'cat_page_1' }]);
 
-  await editOrSendMessage(chatId, messageId, text, { inline_keyboard: buttons });
+  await editOrSendMessage(chatId, messageId, caption, { inline_keyboard: buttons });
 }
 
 // PAYMENT CHOICE & CHECKOUT SCREEN
