@@ -995,16 +995,14 @@ async function showFlashSale(chatId, messageId = null) {
   const fsProducts = await dbAll("SELECT * FROM products WHERE category = '⚡ FLASH SALE' AND status = 'active' ORDER BY id ASC");
 
   if (fsProducts.length === 0) {
-    let emptyText = `┊ ⚡ <b>FLASH SALE</b> ⚡\n`;
-    emptyText += `┊\n`;
-    emptyText += `┊ <i>Saat ini belum ada produk promo Flash Sale aktif.</i>\n`;
-    emptyText += `╰─────────────────✧`;
+    let emptyText = `⚡ <b>FLASH SALE</b> ⚡\n\n`;
+    emptyText += `<i>Saat ini belum ada produk promo Flash Sale aktif.</i>`;
 
     const emptyButtons = [[{ text: '🔙 Kembali ke Katalog', callback_data: 'cat_page_1' }]];
     return editOrSendMessage(chatId, messageId, emptyText, { inline_keyboard: emptyButtons });
   }
 
-  let text = `┊ ⚡ <b>FLASH SALE</b> ⚡\n`;
+  let text = `⚡ <b>FLASH SALE</b> ⚡\n\n`;
 
   const PRESET_ORIG_PRICES = {
     'LINK REDEM GEMINI 3 BULAN': 25000,
@@ -1027,12 +1025,10 @@ async function showFlashSale(chatId, messageId = null) {
     const discountPct = Math.round(((origPrice - p.price) / origPrice) * 100);
     const discLabel = discountPct > 0 ? ` <i>(-${discountPct}%)</i>` : '';
 
-    text += `┊\n`;
-    text += `┊ 🔥 <b>${p.name.toUpperCase()}</b>\n`;
-    text += `┊    <s>${formatRupiah(origPrice)}</s> ➜ <b>${formatRupiah(p.price)}</b>${discLabel}\n`;
+    text += `🔥 <b>${p.name.toUpperCase()}</b>\n`;
+    text += `   <s>${formatRupiah(origPrice)}</s> ➜ <b>${formatRupiah(p.price)}</b>${discLabel}\n\n`;
   });
 
-  text += `╰─────────────────✧\n\n`;
   text += `<i>⚠️ Stok terbatas! Klik produk di bawah untuk langsung beli:</i>`;
 
   const buttons = [];
