@@ -1860,10 +1860,18 @@ bot.on('message', async (msg) => {
     }
 
     if (text === '➕ Add Product') {
-      userStates[chatId] = { step: 'ADD_PROD_CAT' };
-      return bot.sendMessage(chatId, `📂 <b>KATEGORI PRODUK BARU</b>\n\nMasukkan Nama Kategori / Group Produk:\nContoh: <code>SPOTIFY PREMIUM</code>`, {
+      delete userStates[chatId];
+      const buttons = [
+        [
+          { text: '📦 Reguler Product', callback_data: 'admin_add_prod_type_reg' },
+          { text: '⚡ FLASH SALE', callback_data: 'admin_add_prod_type_fs' }
+        ],
+        [{ text: '🔙 Batal', callback_data: 'cancel_state' }]
+      ];
+
+      return bot.sendMessage(chatId, `➕ <b>TAMBAH PRODUK BARU</b>\n\nPilih tipe produk yang ingin ditambahkan:`, {
         parse_mode: 'HTML',
-        reply_markup: getCancelInlineKeyboard()
+        reply_markup: sanitizeReplyMarkup({ inline_keyboard: buttons })
       });
     }
 
@@ -2823,6 +2831,26 @@ bot.on('callback_query', async (query) => {
       bot.sendMessage(chatId, `❌ Backup error: ${e.message}`);
     }
     return bot.answerCallbackQuery(query.id);
+  }
+
+  if (data === 'admin_add_prod_type_fs') {
+    if (!isAdmin(user)) return bot.answerCallbackQuery(query.id, { text: 'Akses ditolak.' });
+    bot.answerCallbackQuery(query.id);
+    userStates[chatId] = { step: 'ADD_PROD_NAME', category: '⚡ FLASH SALE' };
+    return bot.sendMessage(chatId, `⚡ <b>PRODUK FLASH SALE BARU</b>\n\nKategori: <b>⚡ FLASH SALE</b>\n\nMasukkan Nama Variasi Produk:\nContoh: <code>Youtube Premium 1 Bulan</code>`, {
+      parse_mode: 'HTML',
+      reply_markup: getCancelInlineKeyboard()
+    });
+  }
+
+  if (data === 'admin_add_prod_type_reg') {
+    if (!isAdmin(user)) return bot.answerCallbackQuery(query.id, { text: 'Akses ditolak.' });
+    bot.answerCallbackQuery(query.id);
+    userStates[chatId] = { step: 'ADD_PROD_CAT' };
+    return bot.sendMessage(chatId, `📂 <b>KATEGORI PRODUK REGULER</b>\n\nMasukkan Nama Kategori / Group Produk:\nContoh: <code>SPOTIFY PREMIUM</code> atau <code>CANVA PRO</code>`, {
+      parse_mode: 'HTML',
+      reply_markup: getCancelInlineKeyboard()
+    });
   }
 
   if (data.startsWith('admin_sel_stock_prod_')) {
