@@ -1,3 +1,4 @@
+process.env.NTBA_FIX_350 = '1';
 const TelegramBot = require('node-telegram-bot-api');
 const path = require('path');
 const fs = require('fs');
@@ -134,27 +135,52 @@ async function editOrSendMessage(chatId, messageId, captionText, replyMarkup) {
   });
 }
 
-// RESOLVE QRIS PHOTO PAYLOAD (BUFFER OR URL)
-async function getQrPhotoPayload(paymentObj) {
-  if (!paymentObj) return null;
-  if (paymentObj.qrBuffer && Buffer.isBuffer(paymentObj.qrBuffer)) {
-    return paymentObj.qrBuffer;
-  }
-  if (paymentObj.qrImage && typeof paymentObj.qrImage === 'string') {
-    if (paymentObj.qrImage.startsWith('http')) return paymentObj.qrImage;
-    if (paymentObj.qrImage.startsWith('data:image')) {
-      return Buffer.from(paymentObj.qrImage.replace(/^data:image\/\w+;base64,/, ''), 'base64');
+// ROBUST SEND QRIS PHOTO HELPER (BUFFER, FILE, OR URL)
+async function sendQrPhotoOrMessage(chatId, paymentObj, captionText) {
+  let tempFilePath = null;
+  try {
+    let photoSource = null;
+
+    if (paymentObj && paymentObj.qrBuffer && Buffer.isBuffer(paymentObj.qrBuffer)) {
+      tempFilePath = path.join(dbDir, `temp_qr_${Date.now()}_${Math.random().toString(36).slice(2)}.png`);
+      fs.writeFileSync(tempFilePath, paymentObj.qrBuffer);
+      photoSource = tempFilePath;
+    } else if (paymentObj && paymentObj.qrString && typeof paymentObj.qrString === 'string' && paymentObj.qrString.length > 5) {
+      const buf = await QRCode.toBuffer(paymentObj.qrString, { width: 512, margin: 2 });
+      tempFilePath = path.join(dbDir, `temp_qr_${Date.now()}_${Math.random().toString(36).slice(2)}.png`);
+      fs.writeFileSync(tempFilePath, buf);
+      photoSource = tempFilePath;
+    } else if (paymentObj && paymentObj.qrImage && typeof paymentObj.qrImage === 'string') {
+      if (paymentObj.qrImage.startsWith('http')) {
+        photoSource = paymentObj.qrImage;
+      } else if (paymentObj.qrImage.startsWith('data:image')) {
+        const base64Data = paymentObj.qrImage.replace(/^data:image\/\w+;base64,/, '');
+        const buf = Buffer.from(base64Data, 'base64');
+        tempFilePath = path.join(dbDir, `temp_qr_${Date.now()}_${Math.random().toString(36).slice(2)}.png`);
+        fs.writeFileSync(tempFilePath, buf);
+        photoSource = tempFilePath;
+      } else if (paymentObj.qrImage.length > 20) {
+        const buf = await QRCode.toBuffer(paymentObj.qrImage, { width: 512, margin: 2 });
+        tempFilePath = path.join(dbDir, `temp_qr_${Date.now()}_${Math.random().toString(36).slice(2)}.png`);
+        fs.writeFileSync(tempFilePath, buf);
+        photoSource = tempFilePath;
+      }
     }
-    try {
-      return await QRCode.toBuffer(paymentObj.qrImage, { width: 512, margin: 2 });
-    } catch (e) {}
+
+    if (photoSource) {
+      await bot.sendPhoto(chatId, photoSource, { caption: captionText, parse_mode: 'HTML' });
+      return;
+    }
+  } catch (err) {
+    console.error('[SEND QR PHOTO ERROR]:', err.message);
+  } finally {
+    if (tempFilePath && fs.existsSync(tempFilePath)) {
+      try { fs.unlinkSync(tempFilePath); } catch (e) {}
+    }
   }
-  if (paymentObj.qrString && typeof paymentObj.qrString === 'string' && paymentObj.qrString.length > 5) {
-    try {
-      return await QRCode.toBuffer(paymentObj.qrString, { width: 512, margin: 2 });
-    } catch (e) {}
-  }
-  return null;
+
+  // Fallback to text message if photo could not be sent
+  await bot.sendMessage(chatId, captionText, { parse_mode: 'HTML' });
 }
 
 // RATE-LIMITED MESSAGE SENDER FOR SAFE BROADCAST (35ms delay)
@@ -1190,12 +1216,7 @@ bot.on('message', async (msg) => {
       depMsg += `⏱️ Berlaku: <b>${deposit.expiredMinutes} Menit</b>\n`;
       depMsg += `✅ Saldo akan otomatis bertambah dalam hitungan detik setelah bayar.`;
 
-      const photoPayload = await getQrPhotoPayload(deposit);
-      if (photoPayload) {
-        await bot.sendPhoto(chatId, photoPayload, { caption: depMsg, parse_mode: 'HTML' });
-      } else {
-        await bot.sendMessage(chatId, depMsg, { parse_mode: 'HTML' });
-      }
+      await sendQrPhotoOrMessage(chatId, deposit, depMsg);
       return;
     }
 
@@ -2287,13 +2308,7 @@ bot.on('callback_query', async (query) => {
     qrisMsg += `⏱️ Berlaku: <b>${payment.expiredMinutes} Menit</b>\n`;
     qrisMsg += `⚡ Begitu pembayaran terdeteksi, akun akan langsung otomatis dikirim ke chat ini!`;
 
-    const photoPayload = await getQrPhotoPayload(payment);
-    if (photoPayload) {
-      await bot.sendPhoto(chatId, photoPayload, { caption: qrisMsg, parse_mode: 'HTML' });
-    } else {
-      await bot.sendMessage(chatId, qrisMsg, { parse_mode: 'HTML' });
-    }
-
+    await sendQrPhotoOrMessage(chatId, payment, qrisMsg);
     return bot.answerCallbackQuery(query.id);
   }
 

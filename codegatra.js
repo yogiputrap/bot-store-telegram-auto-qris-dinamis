@@ -58,11 +58,12 @@ class CodeGatraService {
 
       const res = await client.post('/order', payload);
       const resData = res.data;
+      console.log('[CODEGATRA ORDER RESPONSE]:', JSON.stringify(resData));
 
       // Handle both direct and enveloped responses
       const dataObj = resData.data || resData;
-      const qrString = dataObj.qr_string || dataObj.qrString || dataObj.raw_qr || dataObj.qr_code || dataObj.qr || '';
-      let qrImage = dataObj.qr_image || dataObj.qr_url || dataObj.qrImage || dataObj.qr_link || dataObj.image_url || '';
+      const qrString = dataObj.qr_string || dataObj.qrString || dataObj.raw_qr || dataObj.qr_code || dataObj.qr || dataObj.qris_data || dataObj.qris || dataObj.payload || '';
+      let qrImage = dataObj.qr_image || dataObj.qr_url || dataObj.qrImage || dataObj.qr_link || dataObj.image_url || dataObj.image || '';
       const totalAmount = Number(dataObj.total_amount || dataObj.totalAmount || dataObj.amount || amount);
       const uniqueCode = Number(dataObj.unique_code || dataObj.uniqueCode || (totalAmount - amount) || 0);
 
