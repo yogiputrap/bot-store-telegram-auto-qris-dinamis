@@ -71,7 +71,7 @@ module.exports = {
   CHANNEL_ID: process.env.CHANNEL_ID || '',
   CHANNEL_URL: process.env.CHANNEL_URL || '',
   GROUP_URL: process.env.GROUP_URL || '',
-  SUPPORT_USERNAME: process.env.SUPPORT_USERNAME || 'owner',
+  SUPPORT_USERNAME: process.env.SUPPORT_USERNAME || 'yopratama',
   BANNER_URL: process.env.BANNER_URL || path.join(__dirname, 'assets', 'moakun_banner.jpg'),
 
   // CodeGatra Auto QRIS Payment Gateway

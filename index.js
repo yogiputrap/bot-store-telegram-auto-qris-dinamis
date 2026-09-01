@@ -324,11 +324,11 @@ async function getUserReplyKeyboard() {
 
   const keyboard = [
     [
-      { text: 'List Produk' },
+      { text: '🛍️ Katalog' },
       { text: '📱 Order OTP' }
     ],
     [
-      { text: 'Cek Saldo' },
+      { text: '💳 Cek Saldo' },
       { text: '💰 Deposit' }
     ]
   ];
@@ -1056,8 +1056,8 @@ bot.on('message', async (msg) => {
 
   // PRIORITY 1: Check if message is a standard Reply Keyboard button or a Category Number
   const MENU_KEYWORDS = [
-    'List Produk', 'Order OTP', 'Cek Saldo', 'Deposit', 'Riwayat Transaksi',
-    'Cari Produk', 'Klaim Voucher', 'Klaim Garansi', 'BANTUAN', 'Populer',
+    'Katalog', 'List Produk', 'Order OTP', 'Cek Saldo', 'Saldo', 'Deposit', 'Riwayat Transaksi',
+    'Cari Produk', 'Klaim Voucher', 'Klaim Garansi', 'BANTUAN', 'Bantuan', 'Populer',
     'Menu User', 'Kelola Produk', 'Laporan Stok', 'Add Product', 'Add Stock',
     'Voucher', 'Saldo RumahOTP', 'Deposit RumahOTP', 'Pesanan App', 'Pesanan OTP',
     'Statistik & Export', 'Status CodeGatra', 'Broadcast'
@@ -1341,7 +1341,7 @@ bot.on('message', async (msg) => {
   }
 
   // PRIORITY 3: USER REPLY KEYBOARD ACTIONS
-  if (text.includes('List Produk')) {
+  if (text.includes('Katalog') || text.includes('List Produk')) {
     return renderCatalog(chatId, 1, null);
   }
 
@@ -1349,7 +1349,7 @@ bot.on('message', async (msg) => {
     return renderOtpServicesMenu(chatId, null, 1);
   }
 
-  if (text.includes('Cek Saldo')) {
+  if (text.includes('Cek Saldo') || text === 'Saldo' || text === '💳 Cek Saldo') {
     return bot.sendMessage(chatId, `💰 <b>SALDO AKUN</b>\n\nSaldo Anda: <b>${formatRupiah(user.balance)}</b>`, {
       parse_mode: 'HTML',
       reply_markup: sanitizeReplyMarkup({ inline_keyboard: [[{ text: '➕ Isi Saldo (Deposit)', callback_data: 'deposit_prompt' }]] })
@@ -1390,13 +1390,13 @@ bot.on('message', async (msg) => {
     });
   }
 
-  if (text === '🌐 BANTUAN') {
-    let guide = `❓ <b>PANDUAN & BANTUAN ${config.STORE_NAME}</b>\n\n`;
-    guide += `1. <b>Beli Akun Digital:</b> Klik <b>List Produk</b> → pilih nomor → pilih jumlah → bayar via Saldo / Auto QRIS 24 Jam.\n`;
+  if (text.includes('BANTUAN') || text.includes('Bantuan')) {
+    let guide = `❓ <b>PANDUAN & BANTUAN ${config.STORE_NAME || 'MOAKUN STORE'}</b>\n\n`;
+    guide += `1. <b>Beli Akun Digital:</b> Klik <b>🛍️ Katalog</b> → pilih nomor → pilih jumlah → bayar via Saldo / Auto QRIS 24 Jam.\n`;
     guide += `2. <b>Order OTP Virtual:</b> Klik <b>📱 Order OTP</b> → pilih layanan → bayar saldo → nomor HP muncul dan kode OTP akan otomatis masuk tanpa perlu refresh!\n`;
     guide += `3. <b>Isi Saldo:</b> Klik <b>💰 Deposit</b> → masukkan nominal → bayar QRIS otomatis.\n`;
     guide += `4. <b>Riwayat Akun:</b> Semua akun yang dibeli tersimpan di menu <b>📜 Riwayat Transaksi</b>.\n\n`;
-    guide += `Butuh bantuan CS? Hubungi @${config.SUPPORT_USERNAME || 'owner'}`;
+    guide += `Butuh Bantuan CS? Hubungi admin @${config.SUPPORT_USERNAME || 'yopratama'}`;
     return bot.sendMessage(chatId, guide, { parse_mode: 'HTML' });
   }
 
