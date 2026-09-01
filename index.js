@@ -111,8 +111,25 @@ function sanitizeReplyMarkup(replyMarkup) {
   return cleanMarkup;
 }
 
-// SMART EDIT MESSAGE HELPER
-async function editOrSendMessage(chatId, messageId, captionText, replyMarkup) {
+// SCREEN MESSAGE TRACKER FOR ANTI-SPAM CLEAN CHAT
+const lastActiveScreenMessage = {}; // chatId -> messageId
+
+async function deleteMessageSafe(chatId, messageId) {
+  if (!chatId || !messageId) return;
+  try {
+    await bot.deleteMessage(chatId, messageId);
+  } catch (e) {}
+}
+
+async function cleanupPreviousScreen(chatId) {
+  if (lastActiveScreenMessage[chatId]) {
+    await deleteMessageSafe(chatId, lastActiveScreenMessage[chatId]);
+    delete lastActiveScreenMessage[chatId];
+  }
+}
+
+// SMART EDIT OR CLEAN-SEND MESSAGE HELPER
+async function editOrSendMessage(chatId, messageId, captionText, replyMarkup, useBanner = true) {
   const safeMarkup = sanitizeReplyMarkup(replyMarkup);
 
   if (messageId) {
@@ -123,7 +140,8 @@ async function editOrSendMessage(chatId, messageId, captionText, replyMarkup) {
         parse_mode: 'HTML',
         reply_markup: safeMarkup
       });
-      return;
+      lastActiveScreenMessage[chatId] = messageId;
+      return { message_id: messageId };
     } catch (e) {
       try {
         await bot.editMessageText(captionText, {
@@ -132,31 +150,42 @@ async function editOrSendMessage(chatId, messageId, captionText, replyMarkup) {
           parse_mode: 'HTML',
           reply_markup: safeMarkup
         });
-        return;
+        lastActiveScreenMessage[chatId] = messageId;
+        return { message_id: messageId };
       } catch (err) {}
     }
   }
 
-  if (config.BANNER_URL) {
+  // When sending a new screen (messageId is null or edit failed), delete previous screen to prevent chat spam
+  await cleanupPreviousScreen(chatId);
+
+  if (useBanner && config.BANNER_URL) {
     try {
       let photoSource = config.BANNER_URL;
       if (photoSource.startsWith('http') || fs.existsSync(photoSource)) {
-        await bot.sendPhoto(chatId, photoSource, {
+        const sent = await bot.sendPhoto(chatId, photoSource, {
           caption: captionText,
           parse_mode: 'HTML',
           reply_markup: safeMarkup
         });
-        return;
+        if (sent && sent.message_id) {
+          lastActiveScreenMessage[chatId] = sent.message_id;
+        }
+        return sent;
       }
     } catch (photoErr) {
       // Fallback to text
     }
   }
 
-  await bot.sendMessage(chatId, captionText, {
+  const sent = await bot.sendMessage(chatId, captionText, {
     parse_mode: 'HTML',
     reply_markup: safeMarkup
   });
+  if (sent && sent.message_id) {
+    lastActiveScreenMessage[chatId] = sent.message_id;
+  }
+  return sent;
 }
 
 // ROBUST RESOLVE QRIS BUFFER HELPER (BUFFER, QR_STRING, BASE64, URL, OR DYNAMIC EMVCO)
@@ -257,6 +286,7 @@ async function resolveQrBuffer(paymentObj) {
 
 // ROBUST SEND QRIS PHOTO HELPER (BUFFER-FIRST, MULTI-TIER FALLBACK)
 async function sendQrPhotoOrMessage(chatId, paymentObj, captionText, replyMarkup = null) {
+  await cleanupPreviousScreen(chatId);
   const safeMarkup = replyMarkup ? sanitizeReplyMarkup(replyMarkup) : undefined;
   try {
     const photoBuffer = await resolveQrBuffer(paymentObj);
@@ -275,16 +305,19 @@ async function sendQrPhotoOrMessage(chatId, paymentObj, captionText, replyMarkup
         const photoOptions = { caption: caption, parse_mode: 'HTML' };
         if (safeMarkup) photoOptions.reply_markup = safeMarkup;
 
-        await bot.sendPhoto(
+        const sent = await bot.sendPhoto(
           chatId,
           photoBuffer,
           photoOptions,
           { filename: `qris_${Date.now()}.png`, contentType: 'image/png' }
         );
+        if (sent && sent.message_id) {
+          lastActiveScreenMessage[chatId] = sent.message_id;
+        }
         if (extraText) {
           await bot.sendMessage(chatId, extraText, { parse_mode: 'HTML', reply_markup: safeMarkup });
         }
-        return;
+        return sent;
       } catch (sendPhotoErr) {
         console.warn('[SEND PHOTO RETRY 1]: HTML caption failed, retrying plain text...', sendPhotoErr.message);
 
@@ -294,16 +327,19 @@ async function sendQrPhotoOrMessage(chatId, paymentObj, captionText, replyMarkup
           const photoOptions = { caption: plainCaption };
           if (safeMarkup) photoOptions.reply_markup = safeMarkup;
 
-          await bot.sendPhoto(
+          const sent = await bot.sendPhoto(
             chatId,
             photoBuffer,
             photoOptions,
             { filename: `qris_${Date.now()}.png`, contentType: 'image/png' }
           );
+          if (sent && sent.message_id) {
+            lastActiveScreenMessage[chatId] = sent.message_id;
+          }
           if (extraText) {
             await bot.sendMessage(chatId, extraText, { parse_mode: 'HTML', reply_markup: safeMarkup });
           }
-          return;
+          return sent;
         } catch (plainErr) {
           console.warn('[SEND PHOTO RETRY 2]: Retrying photo without caption...', plainErr.message);
 
@@ -315,8 +351,11 @@ async function sendQrPhotoOrMessage(chatId, paymentObj, captionText, replyMarkup
               {},
               { filename: `qris_${Date.now()}.png`, contentType: 'image/png' }
             );
-            await bot.sendMessage(chatId, captionText, { parse_mode: 'HTML', reply_markup: safeMarkup });
-            return;
+            const sent = await bot.sendMessage(chatId, captionText, { parse_mode: 'HTML', reply_markup: safeMarkup });
+            if (sent && sent.message_id) {
+              lastActiveScreenMessage[chatId] = sent.message_id;
+            }
+            return sent;
           } catch (photoOnlyErr) {
             console.error('[SEND PHOTO RETRY 3 FAILED]:', photoOnlyErr.message);
           }
@@ -328,7 +367,11 @@ async function sendQrPhotoOrMessage(chatId, paymentObj, captionText, replyMarkup
   }
 
   // Fallback to text message if photo could not be delivered
-  await bot.sendMessage(chatId, captionText, { parse_mode: 'HTML', reply_markup: safeMarkup });
+  const sent = await bot.sendMessage(chatId, captionText, { parse_mode: 'HTML', reply_markup: safeMarkup });
+  if (sent && sent.message_id) {
+    lastActiveScreenMessage[chatId] = sent.message_id;
+  }
+  return sent;
 }
 
 // RATE-LIMITED MESSAGE SENDER FOR SAFE BROADCAST (35ms delay)
@@ -768,6 +811,7 @@ async function showCategoryByIndex(chatId, index, messageId = null) {
 
 // DASHBOARD START (USER)
 async function sendStartDashboard(chatId, user) {
+  await cleanupPreviousScreen(chatId);
   const userSpent = await dbGet('SELECT SUM(amount) as s FROM orders WHERE user_id = ? AND status = \'completed\'', [user.id]);
 
   let text = `Halo <b>${user.first_name || 'Kak'}</b> | Open! 👏\n`;
@@ -793,11 +837,15 @@ async function sendStartDashboard(chatId, user) {
   text += `/cari – Cari produk spesifik\n`;
 
   const keyboardMarkup = await getUserReplyKeyboard();
-  await bot.sendMessage(chatId, text, { parse_mode: 'HTML', ...keyboardMarkup });
+  const sent = await bot.sendMessage(chatId, text, { parse_mode: 'HTML', ...keyboardMarkup });
+  if (sent && sent.message_id) {
+    lastActiveScreenMessage[chatId] = sent.message_id;
+  }
 }
 
 // DASHBOARD ADMIN (OWNER / ADMIN)
 async function sendAdminDashboard(chatId, user) {
+  await cleanupPreviousScreen(chatId);
   const totalSold = await dbGet('SELECT COUNT(*) as c FROM orders WHERE status = \'completed\'');
   const totalRev = await dbGet('SELECT SUM(amount) as s FROM orders WHERE status = \'completed\'');
   const totalUsers = await dbGet('SELECT COUNT(*) as c FROM users');
@@ -861,10 +909,13 @@ async function sendAdminDashboard(chatId, user) {
 
   text += `Silakan pilih menu kelola toko di bawah:`;
 
-  await bot.sendMessage(chatId, text, {
+  const sent = await bot.sendMessage(chatId, text, {
     parse_mode: 'HTML',
     ...ADMIN_REPLY_KEYBOARD
   });
+  if (sent && sent.message_id) {
+    lastActiveScreenMessage[chatId] = sent.message_id;
+  }
 }
 
 // SEARCH PRODUCTS
@@ -1098,59 +1149,56 @@ bot.onText(/\/start/, async (msg) => {
 });
 
 bot.onText(/\/(stok|stock|katalog)/, async (msg) => {
+  await deleteMessageSafe(msg.chat.id, msg.message_id);
   await registerUser(msg.from);
   delete userStates[msg.chat.id];
   await renderCatalog(msg.chat.id, 1, null);
 });
 
 bot.onText(/\/saldo/, async (msg) => {
+  await deleteMessageSafe(msg.chat.id, msg.message_id);
   const user = await registerUser(msg.from);
   delete userStates[msg.chat.id];
-  bot.sendMessage(msg.chat.id, `💰 <b>SALDO AKUN</b>\n\nSaldo Anda: <b>${formatRupiah(user.balance)}</b>`, {
-    parse_mode: 'HTML',
-    reply_markup: sanitizeReplyMarkup({ inline_keyboard: [[{ text: '➕ Isi Saldo (Deposit)', callback_data: 'deposit_prompt' }]] })
-  });
+  return editOrSendMessage(msg.chat.id, null, `💰 <b>SALDO AKUN</b>\n\nSaldo Anda: <b>${formatRupiah(user.balance)}</b>`, {
+    inline_keyboard: [[{ text: '➕ Isi Saldo (Deposit)', callback_data: 'deposit_prompt' }]]
+  }, false);
 });
 
 bot.onText(/\/deposit/, async (msg) => {
+  await deleteMessageSafe(msg.chat.id, msg.message_id);
   const user = await registerUser(msg.from);
   userStates[msg.chat.id] = { step: 'AWAITING_DEPOSIT_AMOUNT' };
-  bot.sendMessage(msg.chat.id, `💰 <b>DEPOSIT SALDO INSTAN</b>\n\nSaldo Anda: <b>${formatRupiah(user.balance)}</b>\nMinimal deposit: <b>${formatRupiah(config.MIN_DEPOSIT)}</b>\n\nMasukkan nominal yang ingin dideposit:`, {
-    parse_mode: 'HTML',
-    reply_markup: getCancelInlineKeyboard()
-  });
+  return editOrSendMessage(msg.chat.id, null, `💰 <b>DEPOSIT SALDO INSTAN</b>\n\nSaldo Anda: <b>${formatRupiah(user.balance)}</b>\nMinimal deposit: <b>${formatRupiah(config.MIN_DEPOSIT)}</b>\n\nMasukkan nominal yang ingin dideposit:`, getCancelInlineKeyboard(), false);
 });
 
 bot.onText(/\/riwayat/, async (msg) => {
+  await deleteMessageSafe(msg.chat.id, msg.message_id);
   const user = await registerUser(msg.from);
   delete userStates[msg.chat.id];
   await showUserHistory(msg.chat.id, user, null);
 });
 
 bot.onText(/\/cari(?:\s+(.+))?/, async (msg, match) => {
+  await deleteMessageSafe(msg.chat.id, msg.message_id);
   const user = await registerUser(msg.from);
   const keyword = match && match[1] ? match[1].trim() : null;
   if (!keyword) {
     userStates[msg.chat.id] = { step: 'AWAITING_SEARCH_KEYWORD' };
-    return bot.sendMessage(msg.chat.id, `🔍 <b>CARI PRODUK</b>\n\nKetik nama produk atau kategori yang ingin dicari (contoh: <code>spotify</code> atau <code>canva</code>):`, {
-      parse_mode: 'HTML',
-      reply_markup: getCancelInlineKeyboard()
-    });
+    return editOrSendMessage(msg.chat.id, null, `🔍 <b>CARI PRODUK</b>\n\nKetik nama produk atau kategori yang ingin dicari (contoh: <code>spotify</code> atau <code>canva</code>):`, getCancelInlineKeyboard(), false);
   }
   delete userStates[msg.chat.id];
   await searchProducts(msg.chat.id, keyword, null);
 });
 
 bot.onText(/\/garansi/, async (msg) => {
+  await deleteMessageSafe(msg.chat.id, msg.message_id);
   const user = await registerUser(msg.from);
   userStates[msg.chat.id] = { step: 'AWAITING_WARRANTY_INPUT' };
-  bot.sendMessage(msg.chat.id, `🛡️ <b>KLAIM GARANSI PRODUK</b>\n\nFormat klaim garansi:\n<code>ORDER_CODE | KELUHAN</code>\n\nContoh:\n<code>ORD-1725000000 | Akun Canva tidak bisa login / password salah</code>`, {
-    parse_mode: 'HTML',
-    reply_markup: getCancelInlineKeyboard()
-  });
+  return editOrSendMessage(msg.chat.id, null, `🛡️ <b>KLAIM GARANSI PRODUK</b>\n\nFormat klaim garansi:\n<code>ORDER_CODE | KELUHAN</code>\n\nContoh:\n<code>ORD-1725000000 | Akun Canva tidak bisa login / password salah</code>`, getCancelInlineKeyboard(), false);
 });
 
 bot.onText(/\/voucher(?:\s+(.+))?/, async (msg, match) => {
+  await deleteMessageSafe(msg.chat.id, msg.message_id);
   const user = await registerUser(msg.from);
   delete userStates[msg.chat.id];
   const code = match && match[1] ? match[1].trim() : null;
@@ -1165,14 +1213,14 @@ bot.onText(/\/voucher(?:\s+(.+))?/, async (msg, match) => {
       });
       text += `\nGunakan kode voucher saat checkout pembelian!`;
     }
-    return bot.sendMessage(msg.chat.id, text, { parse_mode: 'HTML' });
+    return editOrSendMessage(msg.chat.id, null, text, { inline_keyboard: [[{ text: '🛒 Buka Katalog', callback_data: 'cat_page_1' }]] }, false);
   }
 
   const vCheck = await PaymentService.validateVoucher(dbGet, code, user.id, 100000);
   if (vCheck.valid) {
-    return bot.sendMessage(msg.chat.id, `✅ <b>VOUCHER VALID!</b>\n\nKode: <code>${vCheck.code}</code>\nPotongan: <b>${formatRupiah(vCheck.discountAmount)}</b>\n\nGunakan kode ini pada saat memilih variasi produk di katalog.`, { parse_mode: 'HTML' });
+    return editOrSendMessage(msg.chat.id, null, `✅ <b>VOUCHER VALID!</b>\n\nKode: <code>${vCheck.code}</code>\nPotongan: <b>${formatRupiah(vCheck.discountAmount)}</b>\n\nGunakan kode ini pada saat memilih variasi produk di katalog.`, { inline_keyboard: [[{ text: '🛒 Buka Katalog', callback_data: 'cat_page_1' }]] }, false);
   } else {
-    return bot.sendMessage(msg.chat.id, `❌ ${vCheck.message}`);
+    return editOrSendMessage(msg.chat.id, null, `❌ ${vCheck.message}`, { inline_keyboard: [[{ text: '🔙 Kembali', callback_data: 'cat_page_1' }]] }, false);
   }
 });
 
@@ -1666,33 +1714,35 @@ bot.on('message', async (msg) => {
 
   // PRIORITY 3: USER REPLY KEYBOARD ACTIONS
   if (text.includes('Katalog') || text.includes('List Produk')) {
+    await deleteMessageSafe(chatId, msg.message_id);
     return renderCatalog(chatId, 1, null);
   }
 
   if (text.includes('Order OTP')) {
+    await deleteMessageSafe(chatId, msg.message_id);
     return renderOtpServicesMenu(chatId, null, 1);
   }
 
   if (text.includes('Cek Saldo') || text === 'Saldo' || text === '💳 Cek Saldo') {
-    return bot.sendMessage(chatId, `💰 <b>SALDO AKUN</b>\n\nSaldo Anda: <b>${formatRupiah(user.balance)}</b>`, {
-      parse_mode: 'HTML',
-      reply_markup: sanitizeReplyMarkup({ inline_keyboard: [[{ text: '➕ Isi Saldo (Deposit)', callback_data: 'deposit_prompt' }]] })
-    });
+    await deleteMessageSafe(chatId, msg.message_id);
+    return editOrSendMessage(chatId, null, `💰 <b>SALDO AKUN</b>\n\nSaldo Anda: <b>${formatRupiah(user.balance)}</b>`, {
+      inline_keyboard: [[{ text: '➕ Isi Saldo (Deposit)', callback_data: 'deposit_prompt' }]]
+    }, false);
   }
 
   if (text.includes('Riwayat Transaksi')) {
+    await deleteMessageSafe(chatId, msg.message_id);
     return showUserHistory(chatId, user, null);
   }
 
   if (text.includes('Cari Produk')) {
+    await deleteMessageSafe(chatId, msg.message_id);
     userStates[chatId] = { step: 'AWAITING_SEARCH_KEYWORD' };
-    return bot.sendMessage(chatId, `🔍 <b>CARI PRODUK</b>\n\nKetik nama produk atau variasi yang ingin dicari:`, {
-      parse_mode: 'HTML',
-      reply_markup: getCancelInlineKeyboard()
-    });
+    return editOrSendMessage(chatId, null, `🔍 <b>CARI PRODUK</b>\n\nKetik nama produk atau variasi yang ingin dicari:`, getCancelInlineKeyboard(), false);
   }
 
   if (text.includes('Klaim Voucher')) {
+    await deleteMessageSafe(chatId, msg.message_id);
     const activeVouchers = await dbAll('SELECT * FROM vouchers WHERE status = \'active\'');
     let vMsg = `🎟️ <b>VOUCHER PROMO TOKO</b>\n\n`;
     if (activeVouchers.length === 0) {
@@ -1703,46 +1753,46 @@ bot.on('message', async (msg) => {
       });
       vMsg += `\n<i>Masukkan kode voucher saat memilih metode pembayaran di katalog!</i>`;
     }
-    return bot.sendMessage(chatId, vMsg, { parse_mode: 'HTML' });
+    return editOrSendMessage(chatId, null, vMsg, { inline_keyboard: [[{ text: '🛒 Buka Katalog', callback_data: 'cat_page_1' }]] }, false);
   }
 
   if (text.includes('Klaim Garansi')) {
+    await deleteMessageSafe(chatId, msg.message_id);
     userStates[chatId] = { step: 'AWAITING_WARRANTY_INPUT' };
-    return bot.sendMessage(chatId, `🛡️ <b>KLAIM GARANSI PRODUK</b>\n\nFormat:\n<code>ORDER_CODE | KELUHAN</code>\n\nContoh:\n<code>ORD-1725000000 | Akun Spotify error tidak bisa login</code>`, {
-      parse_mode: 'HTML',
-      reply_markup: getCancelInlineKeyboard()
-    });
+    return editOrSendMessage(chatId, null, `🛡️ <b>KLAIM GARANSI PRODUK</b>\n\nFormat:\n<code>ORDER_CODE | KELUHAN</code>\n\nContoh:\n<code>ORD-1725000000 | Akun Spotify error tidak bisa login</code>`, getCancelInlineKeyboard(), false);
   }
 
   if (text.includes('BANTUAN') || text.includes('Bantuan')) {
+    await deleteMessageSafe(chatId, msg.message_id);
     let guide = `❓ <b>PANDUAN & BANTUAN ${config.STORE_NAME || 'MOAKUN STORE'}</b>\n\n`;
     guide += `1. <b>Beli Akun Digital:</b> Klik <b>🛍️ Katalog</b> → pilih nomor → pilih jumlah → bayar via Saldo / Auto QRIS 24 Jam.\n`;
     guide += `2. <b>Order OTP Virtual:</b> Klik <b>📱 Order OTP</b> → pilih layanan → bayar saldo → nomor HP muncul dan kode OTP akan otomatis masuk tanpa perlu refresh!\n`;
     guide += `3. <b>Isi Saldo:</b> Klik <b>💰 Deposit</b> → masukkan nominal → bayar QRIS otomatis.\n`;
     guide += `4. <b>Riwayat Akun:</b> Semua akun yang dibeli tersimpan di menu <b>📜 Riwayat Transaksi</b>.\n\n`;
     guide += `Butuh Bantuan CS? Hubungi admin @${config.SUPPORT_USERNAME || 'yopratama'}`;
-    return bot.sendMessage(chatId, guide, { parse_mode: 'HTML' });
+    return editOrSendMessage(chatId, null, guide, { inline_keyboard: [[{ text: '🛒 Buka Katalog', callback_data: 'cat_page_1' }]] }, false);
   }
 
   if (text === '🔥 Populer') {
+    await deleteMessageSafe(chatId, msg.message_id);
     return renderCatalog(chatId, 1, null);
   }
 
   if (text.includes('Deposit')) {
+    await deleteMessageSafe(chatId, msg.message_id);
     userStates[chatId] = { step: 'AWAITING_DEPOSIT_AMOUNT' };
-    return bot.sendMessage(chatId, `💰 <b>DEPOSIT SALDO INSTAN</b>\n\nSaldo Anda saat ini: <b>${formatRupiah(user.balance)}</b>\n\nMasukkan nominal deposit (min ${formatRupiah(config.MIN_DEPOSIT)}):`, {
-      parse_mode: 'HTML',
-      reply_markup: getCancelInlineKeyboard()
-    });
+    return editOrSendMessage(chatId, null, `💰 <b>DEPOSIT SALDO INSTAN</b>\n\nSaldo Anda saat ini: <b>${formatRupiah(user.balance)}</b>\n\nMasukkan nominal deposit (min ${formatRupiah(config.MIN_DEPOSIT)}):`, getCancelInlineKeyboard(), false);
   }
 
   if (text === '🏠 Menu User') {
+    await deleteMessageSafe(chatId, msg.message_id);
     return sendStartDashboard(chatId, user);
   }
 
   // PRIORITY 4: ADMIN KEYBOARD ACTIONS
   if (user.role === 'admin' || user.role === 'owner') {
     if (text === '🏷️ Kelola Produk') {
+      await deleteMessageSafe(chatId, msg.message_id);
       const prods = await dbAll('SELECT p.*, COUNT(s.id) as stock FROM products p LEFT JOIN product_stock s ON p.id = s.product_id AND s.status = \'available\' GROUP BY p.id');
       let pMsg = `🏷️ <b>MANAJEMEN PRODUK TOKO</b>\n\n`;
       const buttons = [];
@@ -1755,13 +1805,11 @@ bot.on('message', async (msg) => {
         ]);
       });
 
-      return bot.sendMessage(chatId, pMsg, {
-        parse_mode: 'HTML',
-        reply_markup: sanitizeReplyMarkup({ inline_keyboard: buttons })
-      });
+      return editOrSendMessage(chatId, null, pMsg, { inline_keyboard: buttons }, false);
     }
 
     if (text === '📦 Laporan Stok') {
+      await deleteMessageSafe(chatId, msg.message_id);
       const readyProds = await dbAll(`SELECT p.category, p.name, COUNT(s.id) as count FROM products p LEFT JOIN product_stock s ON p.id = s.product_id AND s.status = 'available' GROUP BY p.id HAVING count > 0`);
       const emptyProds = await dbAll(`SELECT p.category, p.name, COUNT(s.id) as count FROM products p LEFT JOIN product_stock s ON p.id = s.product_id AND s.status = 'available' GROUP BY p.id HAVING count = 0`);
 
@@ -1773,27 +1821,25 @@ bot.on('message', async (msg) => {
       emptyProds.forEach(p => { report += `• ${p.category} (${p.name}): <b>0</b>\n`; });
 
       report += `\n━━━━━━━━━━━━━━━━━━\nTotal Stock Ready: <b>${readyTotal} Account</b>`;
-      return bot.sendMessage(chatId, report, { parse_mode: 'HTML' });
+      return editOrSendMessage(chatId, null, report, { inline_keyboard: [[{ text: '➕ Add Product', callback_data: 'admin_add_prod' }]] }, false);
     }
 
     if (text === '➕ Add Product') {
+      await deleteMessageSafe(chatId, msg.message_id);
       userStates[chatId] = { step: 'ADD_PROD_CAT' };
-      return bot.sendMessage(chatId, `📂 <b>KATEGORI PRODUK BARU</b>\n\nMasukkan Nama Kategori / Group Produk:\nContoh: <code>SPOTIFY PREMIUM</code>`, {
-        parse_mode: 'HTML',
-        reply_markup: getCancelInlineKeyboard()
-      });
+      return editOrSendMessage(chatId, null, `📂 <b>KATEGORI PRODUK BARU</b>\n\nMasukkan Nama Kategori / Group Produk:\nContoh: <code>SPOTIFY PREMIUM</code>`, getCancelInlineKeyboard(), false);
     }
 
     if (text === '📥 Add Stock') {
+      await deleteMessageSafe(chatId, msg.message_id);
       const products = await dbAll('SELECT * FROM products WHERE status = \'active\'');
       const inline = products.map(p => [{ text: `${p.category} - ${p.name}`, callback_data: `admin_sel_stock_prod_${p.id}` }]);
       inline.push([{ text: '🔙 Batal', callback_data: 'cancel_state' }]);
-      return bot.sendMessage(chatId, `📦 <b>TAMBAH STOCK</b>\n\nPilih produk/variasi yang ingin diisi stock:`, {
-        reply_markup: sanitizeReplyMarkup({ inline_keyboard: inline })
-      });
+      return editOrSendMessage(chatId, null, `📦 <b>TAMBAH STOCK</b>\n\nPilih produk/variasi yang ingin diisi stock:`, { inline_keyboard: inline }, false);
     }
 
     if (text === '🎟️ Voucher') {
+      await deleteMessageSafe(chatId, msg.message_id);
       userStates[chatId] = { step: 'AWAITING_VOUCHER_INPUT' };
       const vouchers = await dbAll('SELECT * FROM vouchers ORDER BY id DESC LIMIT 15');
       let vMsg = `🎟️ <b>KELOLA VOUCHER TOKO</b>\n\n`;
@@ -1815,13 +1861,14 @@ bot.on('message', async (msg) => {
       vMsg += `<b>Tambah Voucher Baru:</b> Kirim langsung format:\n<code>KODE|POTONGAN|MIN_BELANJA|JUMLAH_STOK</code>\n\nContoh: <code>PROMOKOK|4500|5000|5</code>`;
       vButtons.push([{ text: '➕ Tambah Voucher Baru', callback_data: 'admin_add_voucher_prompt' }]);
 
-      return bot.sendMessage(chatId, vMsg, { parse_mode: 'HTML', reply_markup: sanitizeReplyMarkup({ inline_keyboard: vButtons }) });
+      return editOrSendMessage(chatId, null, vMsg, { inline_keyboard: vButtons }, false);
     }
 
     if (text === '💳 Saldo RumahOTP') {
+      await deleteMessageSafe(chatId, msg.message_id);
       const balRes = await OtpService.getBalance();
       if (!balRes.success) {
-        return bot.sendMessage(chatId, `❌ Gagal mengecek saldo RumahOTP: ${balRes.message}`);
+        return editOrSendMessage(chatId, null, `❌ Gagal mengecek saldo RumahOTP: ${balRes.message}`, null, false);
       }
 
       let balMsg = `💳 <b>SALDO AKUN RUMAHOTP OWNER</b>\n\n`;
@@ -1829,10 +1876,11 @@ bot.on('message', async (msg) => {
       balMsg += `Username: <b>${balRes.data.username}</b>\n`;
       balMsg += `Saldo Provider: <b>${balRes.data.formated}</b>`;
 
-      return bot.sendMessage(chatId, balMsg, { parse_mode: 'HTML' });
+      return editOrSendMessage(chatId, null, balMsg, { inline_keyboard: [[{ text: '🔄 Refresh Saldo', callback_data: 'admin_refresh_otp_bal' }]] }, false);
     }
 
     if (text === '⚙️ Status CodeGatra') {
+      await deleteMessageSafe(chatId, msg.message_id);
       const profRes = await CodeGatraService.getProfile();
       let cgMsg = `⚙️ <b>STATUS CODEGATRA PAYMENT GATEWAY</b>\n\n`;
       cgMsg += `Base URL: <code>${config.CODEGATRA_BASE_URL}</code>\n`;
@@ -1846,7 +1894,7 @@ bot.on('message', async (msg) => {
         cgMsg += `⚠️ <b>Koneksi:</b> ${profRes.message || 'Gagal tersambung'}`;
       }
 
-      return bot.sendMessage(chatId, cgMsg, { parse_mode: 'HTML' });
+      return editOrSendMessage(chatId, null, cgMsg, { inline_keyboard: [[{ text: '🔄 Test Koneksi', callback_data: 'admin_test_codegatra' }]] }, false);
     }
 
     if (text === '➕ Deposit RumahOTP') {
