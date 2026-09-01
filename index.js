@@ -635,15 +635,12 @@ async function renderCatalog(chatId, page = 1, messageId = null) {
 
   let idx = startIndex + 1;
   pageCategories.forEach((c) => {
-    const isReady = c.total_stock > 0;
-    const stockBadge = isReady ? `🟢 <b>Ready (${c.total_stock} Akun)</b>` : `🔴 <i>Stok Habis</i>`;
     const priceDisplay = c.min_price === c.max_price
       ? formatRupiah(c.min_price)
       : `${formatRupiah(c.min_price)} - ${formatRupiah(c.max_price)}`;
 
     caption += `<b>[${idx}] ${c.category.toUpperCase()}</b>\n`;
-    caption += `   ├ 💰 ${priceDisplay} (${c.var_count} Pilihan)\n`;
-    caption += `   └ 📦 ${stockBadge}\n\n`;
+    caption += `   └ 💰 ${priceDisplay} (${c.var_count} Pilihan)\n\n`;
     idx++;
   });
 
@@ -656,10 +653,8 @@ async function renderCatalog(chatId, page = 1, messageId = null) {
   // Direct category buttons for easy 1-tap UX
   pageCategories.forEach((c, i) => {
     const num = startIndex + i + 1;
-    const stockIcon = c.total_stock > 0 ? '🟢' : '🔴';
-    const stockText = c.total_stock > 0 ? `${c.total_stock} pcs` : 'Habis';
     inlineButtons.push([{
-      text: `${stockIcon} [${num}] ${c.category.toUpperCase()} (${stockText})`,
+      text: `[${num}] ${c.category.toUpperCase()}`,
       callback_data: `sel_cat_idx_${num}`
     }]);
   });
