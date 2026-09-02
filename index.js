@@ -2306,7 +2306,7 @@ bot.on('callback_query', async (query) => {
   if (data.startsWith('chk_pay_')) {
     const orderCode = data.replace('chk_pay_', '');
     const pay = await dbGet(`
-      SELECT p.*, o.order_code, o.product_id, o.qty, o.amount as order_amount, o.voucher_code, o.discount_amount, o.status as order_status, u.telegram_id, u.username, pr.name as prod_name, pr.category
+      SELECT p.*, o.order_code, o.message_id as order_msg_id, o.product_id, o.qty, o.amount as order_amount, o.voucher_code, o.discount_amount, o.status as order_status, u.telegram_id, u.username, pr.name as prod_name, pr.category
       FROM payments p
       JOIN orders o ON p.order_id = o.id
       JOIN products pr ON o.product_id = pr.id
@@ -2863,7 +2863,8 @@ bot.on('callback_query', async (query) => {
 
     const sentQr = await sendQrPhotoOrMessage(chatId, payment, qrisMsg, qrisButtons);
     if (sentQr && sentQr.message_id) {
-      await dbRun('UPDATE payments SET message_id = ? WHERE order_id = ?', [sentQr.message_id, orderId]);
+      await dbRun('UPDATE payments SET message_id = ? WHERE ref_id = ? OR payment_code = ?', [sentQr.message_id, payment.refId, payment.paymentCode]);
+      await dbRun('UPDATE orders SET message_id = ? WHERE order_code = ?', [sentQr.message_id, orderCode]);
     }
     return bot.answerCallbackQuery(query.id);
   }

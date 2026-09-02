@@ -293,6 +293,7 @@ async function initDatabase() {
   await ensureColumn('orders', 'gross_amount', 'INTEGER');
   await ensureColumn('orders', 'discount_amount', 'INTEGER DEFAULT 0');
   await ensureColumn('orders', 'voucher_code', 'TEXT');
+  await ensureColumn('orders', 'message_id', 'INTEGER');
   await ensureColumn('otp_orders', 'otp_msg', 'TEXT');
   await ensureColumn('otp_orders', 'completed_at', 'DATETIME');
   await ensureColumn('payments', 'ref_id', 'TEXT');

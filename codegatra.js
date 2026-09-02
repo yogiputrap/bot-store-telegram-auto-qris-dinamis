@@ -421,8 +421,13 @@ class CodeGatraService {
 
           if (depositConfirmed) {
             // Delete the QRIS invoice message so chat is clean and cannot be rescanned
-            if (dep.message_id) {
-              try { await bot.deleteMessage(dep.telegram_id, dep.message_id); } catch(e) {}
+            let targetDepMsgId = Number(dep.message_id);
+            if (!targetDepMsgId || isNaN(targetDepMsgId)) {
+              const dRow = await dbGet('SELECT message_id FROM deposits WHERE id = ?', [dep.id]);
+              targetDepMsgId = Number(dRow?.message_id);
+            }
+            if (targetDepMsgId && !isNaN(targetDepMsgId)) {
+              try { await bot.deleteMessage(dep.telegram_id, targetDepMsgId); } catch(delErr) {}
             }
 
             // Notify User
@@ -449,8 +454,13 @@ class CodeGatraService {
           return { status: 'paid', message: 'Deposit berhasil diverifikasi dan saldo telah masuk!' };
         } else if (statusRes.payment_status === 'expired' || statusRes.payment_status === 'cancelled') {
           await dbRun(`UPDATE deposits SET status = 'expired' WHERE id = ?`, [dep.id]);
-          if (dep.message_id) {
-            try { await bot.deleteMessage(dep.telegram_id, dep.message_id); } catch(e) {}
+          let targetDepMsgId = Number(dep.message_id);
+          if (!targetDepMsgId || isNaN(targetDepMsgId)) {
+            const dRow = await dbGet('SELECT message_id FROM deposits WHERE id = ?', [dep.id]);
+            targetDepMsgId = Number(dRow?.message_id);
+          }
+          if (targetDepMsgId && !isNaN(targetDepMsgId)) {
+            try { await bot.deleteMessage(dep.telegram_id, targetDepMsgId); } catch(delErr) {}
           }
           try {
             await bot.sendMessage(dep.telegram_id, `⚠️ <b>DEPOSIT EXPIRED / KADALUARSA</b>\n\nKode Deposit <code>#${dep.deposit_code}</code> telah kadaluarsa. Silakan lakukan deposit ulang jika ingin mengisi saldo.`, { parse_mode: 'HTML' });
@@ -538,8 +548,14 @@ class CodeGatraService {
           });
 
           // Delete the QRIS invoice message so chat is clean and cannot be rescanned
-          if (pay.message_id) {
-            try { await bot.deleteMessage(pay.telegram_id, pay.message_id); } catch(e) {}
+          let targetMsgId = Number(pay.message_id || pay.order_msg_id);
+          if (!targetMsgId || isNaN(targetMsgId)) {
+            const pRow = await dbGet('SELECT message_id FROM payments WHERE id = ?', [pay.id]);
+            const oRow = await dbGet('SELECT message_id FROM orders WHERE id = ?', [pay.order_id]);
+            targetMsgId = Number(pRow?.message_id || oRow?.message_id);
+          }
+          if (targetMsgId && !isNaN(targetMsgId)) {
+            try { await bot.deleteMessage(pay.telegram_id, targetMsgId); } catch(delErr) {}
           }
 
           if (needStockAlert) {
@@ -590,8 +606,14 @@ class CodeGatraService {
         } else if (statusRes.payment_status === 'expired' || statusRes.payment_status === 'cancelled') {
           await dbRun(`UPDATE payments SET status = 'expired' WHERE id = ?`, [pay.id]);
           await dbRun(`UPDATE orders SET status = 'expired' WHERE id = ?`, [pay.order_id]);
-          if (pay.message_id) {
-            try { await bot.deleteMessage(pay.telegram_id, pay.message_id); } catch(e) {}
+          let targetMsgId = Number(pay.message_id || pay.order_msg_id);
+          if (!targetMsgId || isNaN(targetMsgId)) {
+            const pRow = await dbGet('SELECT message_id FROM payments WHERE id = ?', [pay.id]);
+            const oRow = await dbGet('SELECT message_id FROM orders WHERE id = ?', [pay.order_id]);
+            targetMsgId = Number(pRow?.message_id || oRow?.message_id);
+          }
+          if (targetMsgId && !isNaN(targetMsgId)) {
+            try { await bot.deleteMessage(pay.telegram_id, targetMsgId); } catch(delErr) {}
           }
           try {
             await bot.sendMessage(pay.telegram_id, `⚠️ <b>PEMBAYARAN QRIS EXPIRED</b>\n\nPembayaran untuk order <code>#${pay.order_code}</code> telah kadaluarsa. Silakan lakukan order baru jika ingin membeli.`, { parse_mode: 'HTML' });
@@ -642,7 +664,7 @@ class CodeGatraService {
 
         // 2. Check Pending Auto-QRIS Product Orders
         const pendingPayments = await dbAll(`
-          SELECT p.*, o.order_code, o.product_id, o.qty, o.amount as order_amount, o.voucher_code, o.discount_amount, u.telegram_id, u.username, pr.name as prod_name, pr.category
+          SELECT p.*, o.order_code, o.message_id as order_msg_id, o.product_id, o.qty, o.amount as order_amount, o.voucher_code, o.discount_amount, u.telegram_id, u.username, pr.name as prod_name, pr.category
           FROM payments p
           JOIN orders o ON p.order_id = o.id
           JOIN products pr ON o.product_id = pr.id
