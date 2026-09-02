@@ -405,7 +405,7 @@ async function generateRestockCard({ productName, addedCount, totalStock, addedB
     const canvas = createCanvas(width, height);
     const ctx = canvas.getContext('2d');
 
-    // 1. Try to load and draw the 16:9 Moakun Store background template
+    // 1. Draw 16:9 Moakun Store background template
     let bgLoaded = false;
     const tmplPath = path.join(__dirname, 'assets', 'restock_template.jpg');
     if (loadImage && fs.existsSync(tmplPath)) {
@@ -444,127 +444,210 @@ async function generateRestockCard({ productName, addedCount, totalStock, addedB
       ctx.bezierCurveTo(800, 50, 400, 100, 0, 0);
       ctx.closePath();
       ctx.fill();
-
-      // Brand Title on Left
-      ctx.fillStyle = '#0a192f';
-      ctx.font = 'bold 44px sans-serif';
-      ctx.textAlign = 'left';
-      ctx.fillText(config.STORE_NAME || 'MOAKUN STORE', 90, 240);
-
-      ctx.fillStyle = '#1e3a5f';
-      ctx.font = 'bold 24px sans-serif';
-      ctx.fillText('RESTOCK PRODUK TERBARU', 90, 285);
     }
 
-    // Right Glass Card overlay coordinates
-    // In our 1376x768 template, the frosted glass card center is at x: 1045, width: 440
-    const cardCenterX = 1045;
-    const cardTopY = 175;
-    const cardWidth = 430;
+    const cleanAdmin = String(addedBy || 'Admin').replace(/^@/, '');
+    const cleanProdName = String(productName || 'Produk').trim();
 
-    // 1. Status Pill Badge (Top of right card)
-    ctx.fillStyle = 'rgba(10, 25, 47, 0.9)';
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.15)';
+    // ==========================================
+    // LEFT COLUMN: Branding & Product Showcase
+    // ==========================================
+    const leftX = 90;
+
+    // 1. Restock Tag Badge
+    ctx.fillStyle = '#0a192f';
+    ctx.shadowColor = 'rgba(10, 25, 47, 0.15)';
     ctx.shadowBlur = 10;
-    ctx.shadowOffsetY = 4;
-    drawRoundRect(ctx, cardCenterX - 110, cardTopY, 220, 36, 18, true, false);
+    ctx.shadowOffsetY = 3;
+    drawRoundRect(ctx, leftX, 230, 210, 36, 18, true, false);
     ctx.shadowColor = 'transparent';
 
     ctx.fillStyle = '#e5b85a';
     ctx.font = 'bold 13px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('✦ RESTOCK READY ✦', cardCenterX, cardTopY + 23);
+    ctx.fillText('✦ RESTOCK PRODUK ✦', leftX + 105, 253);
 
-    // 2. Product Name with dynamic font sizing & word wrapping (Bans overflow!)
-    const cleanProdName = String(productName || '').trim();
-    let fontSize = 24;
-    if (cleanProdName.length > 40) fontSize = 20;
-    else if (cleanProdName.length > 28) fontSize = 22;
-
+    // 2. Brand Headline
+    ctx.textAlign = 'left';
     ctx.fillStyle = '#0a192f';
-    ctx.font = `bold ${fontSize}px sans-serif`;
-    const lines = wrapCanvasText(ctx, cleanProdName, cardWidth - 20);
+    ctx.font = 'bold 44px sans-serif';
+    ctx.fillText(config.STORE_NAME || 'MOAKUN STORE', leftX, 318);
 
-    let textY = cardTopY + 70;
-    const maxLines = 3;
+    ctx.fillStyle = '#64748b';
+    ctx.font = 'bold 18px sans-serif';
+    ctx.fillText('Update Stok Akun & Layanan Digital', leftX, 350);
+
+    // 3. Product Showcase Glass Card
+    const cardW = 680;
+    const cardH = 175;
+    const cardY = 380;
+
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+    ctx.strokeStyle = 'rgba(15, 34, 63, 0.1)';
+    ctx.lineWidth = 1.5;
+    ctx.shadowColor = 'rgba(10, 25, 47, 0.08)';
+    ctx.shadowBlur = 20;
+    ctx.shadowOffsetY = 6;
+    drawRoundRect(ctx, leftX, cardY, cardW, cardH, 20, true, true);
+    ctx.shadowColor = 'transparent';
+
+    // Top gold highlight bar on card
+    ctx.fillStyle = '#e5b85a';
+    drawRoundRect(ctx, leftX + 20, cardY, cardW - 40, 4, 2, true, false);
+
+    // Small Ready badge inside card
+    ctx.fillStyle = 'rgba(16, 185, 129, 0.12)';
+    ctx.strokeStyle = 'rgba(16, 185, 129, 0.3)';
+    ctx.lineWidth = 1;
+    drawRoundRect(ctx, leftX + 25, cardY + 22, 130, 28, 14, true, true);
+
+    ctx.fillStyle = '#059669';
+    ctx.font = 'bold 12px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('● READY STOCK', leftX + 90, cardY + 41);
+
+    // Product Title (Wrapped cleanly, no overflow!)
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#0a192f';
+    let prodFontSize = 26;
+    if (cleanProdName.length > 40) prodFontSize = 22;
+    else if (cleanProdName.length > 30) prodFontSize = 24;
+
+    ctx.font = `bold ${prodFontSize}px sans-serif`;
+    const lines = wrapCanvasText(ctx, cleanProdName, cardW - 50);
+
+    let prodY = cardY + 84;
+    const maxLines = 2;
     for (let i = 0; i < Math.min(lines.length, maxLines); i++) {
       let lineStr = lines[i];
       if (i === maxLines - 1 && lines.length > maxLines) lineStr += '...';
-      ctx.fillText(lineStr, cardCenterX, textY);
-      textY += (fontSize + 8);
+      ctx.fillText(lineStr, leftX + 25, prodY);
+      prodY += (prodFontSize + 8);
     }
 
-    // 3. Stats Grid (2 cards: Masuk & Total Stok)
-    const statsY = Math.max(textY + 12, cardTopY + 155);
-    const boxW = 190;
-    const boxH = 88;
-    const box1X = cardCenterX - boxW - 10;
-    const box2X = cardCenterX + 10;
-
-    // Box 1: Masuk (+X pcs)
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
-    ctx.strokeStyle = 'rgba(16, 185, 129, 0.35)';
-    ctx.lineWidth = 1.5;
-    ctx.shadowColor = 'rgba(16, 185, 129, 0.12)';
-    ctx.shadowBlur = 10;
-    ctx.shadowOffsetY = 3;
-    drawRoundRect(ctx, box1X, statsY, boxW, boxH, 16, true, true);
-
+    // Sub-info inside card (Date & Admin)
     ctx.fillStyle = '#64748b';
-    ctx.font = 'bold 12px sans-serif';
-    ctx.fillText('STOK MASUK', box1X + boxW / 2, statsY + 28);
+    ctx.font = '13px sans-serif';
+    ctx.fillText(`🕒 ${dateStr}   •   Ditambahkan oleh: @${cleanAdmin}`, leftX + 25, cardY + 150);
 
-    ctx.fillStyle = '#059669';
-    ctx.font = 'bold 26px sans-serif';
-    ctx.fillText(`+${addedCount} Pcs`, box1X + boxW / 2, statsY + 65);
+    // 4. Trust Badges below card
+    const badgeY = 585;
+    const pillW = 215;
+    const pillH = 42;
+    const pills = [
+      { icon: '⚡', text: 'Instant 24/7 Delivery' },
+      { icon: '🛡️', text: '100% Full Warranty' },
+      { icon: '💳', text: 'Auto QRIS Payment' }
+    ];
 
-    // Box 2: Total Tersedia (Y pcs)
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
-    ctx.strokeStyle = 'rgba(217, 119, 6, 0.35)';
-    ctx.lineWidth = 1.5;
-    ctx.shadowColor = 'rgba(217, 119, 6, 0.12)';
-    ctx.shadowBlur = 10;
-    ctx.shadowOffsetY = 3;
-    drawRoundRect(ctx, box2X, statsY, boxW, boxH, 16, true, true);
+    pills.forEach((p, idx) => {
+      const px = leftX + (idx * (pillW + 16));
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+      ctx.strokeStyle = 'rgba(15, 34, 63, 0.08)';
+      ctx.lineWidth = 1;
+      ctx.shadowColor = 'rgba(10, 25, 47, 0.05)';
+      ctx.shadowBlur = 10;
+      ctx.shadowOffsetY = 3;
+      drawRoundRect(ctx, px, badgeY, pillW, pillH, 21, true, true);
+      ctx.shadowColor = 'transparent';
+
+      ctx.fillStyle = '#1e293b';
+      ctx.font = 'bold 12px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(`${p.icon} ${p.text}`, px + pillW / 2, badgeY + 26);
+    });
+
+    // ==========================================
+    // RIGHT COLUMN: Floating Stats Cards & CTA
+    // ==========================================
+    const rightX = 840;
+    const rightW = 440;
+
+    // --- Card 1: STOK MASUK ---
+    const card1Y = 170;
+    const card1H = 150;
+
+    // Golden glow behind Card 1
+    const glow1 = ctx.createRadialGradient(rightX + rightW / 2, card1Y + card1H / 2, 20, rightX + rightW / 2, card1Y + card1H / 2, 200);
+    glow1.addColorStop(0, 'rgba(246, 196, 69, 0.25)');
+    glow1.addColorStop(1, 'rgba(246, 196, 69, 0)');
+    ctx.fillStyle = glow1;
+    ctx.fillRect(rightX - 30, card1Y - 30, rightW + 60, card1H + 60);
+
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.94)';
+    ctx.strokeStyle = 'rgba(16, 185, 129, 0.4)';
+    ctx.lineWidth = 2;
+    ctx.shadowColor = 'rgba(16, 185, 129, 0.12)';
+    ctx.shadowBlur = 20;
+    ctx.shadowOffsetY = 6;
+    drawRoundRect(ctx, rightX, card1Y, rightW, card1H, 22, true, true);
     ctx.shadowColor = 'transparent';
 
+    ctx.textAlign = 'left';
     ctx.fillStyle = '#64748b';
-    ctx.font = 'bold 12px sans-serif';
-    ctx.fillText('TOTAL TERSEDIA', box2X + boxW / 2, statsY + 28);
+    ctx.font = 'bold 13px sans-serif';
+    ctx.fillText('STOK MASUK BARU', rightX + 30, card1Y + 40);
+
+    ctx.fillStyle = '#059669';
+    ctx.font = 'bold 50px sans-serif';
+    ctx.fillText(`+${addedCount} Pcs`, rightX + 30, card1Y + 98);
+
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = '13px sans-serif';
+    ctx.fillText('Stok produk telah sukses ditambahkan', rightX + 30, card1Y + 128);
+
+    // --- Card 2: TOTAL TERSEDIA ---
+    const card2Y = 350;
+    const card2H = 150;
+
+    // Golden glow behind Card 2
+    const glow2 = ctx.createRadialGradient(rightX + rightW / 2, card2Y + card2H / 2, 20, rightX + rightW / 2, card2Y + card2H / 2, 200);
+    glow2.addColorStop(0, 'rgba(246, 196, 69, 0.25)');
+    glow2.addColorStop(1, 'rgba(246, 196, 69, 0)');
+    ctx.fillStyle = glow2;
+    ctx.fillRect(rightX - 30, card2Y - 30, rightW + 60, card2H + 60);
+
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.94)';
+    ctx.strokeStyle = 'rgba(217, 119, 6, 0.4)';
+    ctx.lineWidth = 2;
+    ctx.shadowColor = 'rgba(217, 119, 6, 0.12)';
+    ctx.shadowBlur = 20;
+    ctx.shadowOffsetY = 6;
+    drawRoundRect(ctx, rightX, card2Y, rightW, card2H, 22, true, true);
+    ctx.shadowColor = 'transparent';
+
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#64748b';
+    ctx.font = 'bold 13px sans-serif';
+    ctx.fillText('TOTAL STOK TERSEDIA', rightX + 30, card2Y + 40);
 
     ctx.fillStyle = '#d97706';
-    ctx.font = 'bold 26px sans-serif';
-    ctx.fillText(`${totalStock} Pcs`, box2X + boxW / 2, statsY + 65);
+    ctx.font = 'bold 50px sans-serif';
+    ctx.fillText(`${totalStock} Pcs`, rightX + 30, card2Y + 98);
 
-    // 4. Details info bar (Date & Admin)
-    const detailY = statsY + boxH + 18;
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
-    ctx.strokeStyle = 'rgba(15, 34, 63, 0.08)';
-    ctx.lineWidth = 1;
-    drawRoundRect(ctx, cardCenterX - (cardWidth / 2), detailY, cardWidth, 40, 12, true, true);
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = '13px sans-serif';
+    ctx.fillText('Siap langsung diorder otomatis via bot', rightX + 30, card2Y + 128);
 
-    ctx.fillStyle = '#475569';
-    ctx.font = '12px sans-serif';
-    const cleanAdmin = (addedBy || 'Admin').replace('@', '');
-    ctx.fillText(`Waktu: ${dateStr}   •   Admin: @${cleanAdmin}`, cardCenterX, detailY + 25);
-
-    // 5. Call-to-action button
-    const btnY = detailY + 56;
-    const btnW = 360;
-    const btnH = 50;
-    const btnGrad = ctx.createLinearGradient(cardCenterX - btnW / 2, btnY, cardCenterX + btnW / 2, btnY);
+    // --- Card 3: CTA Button ---
+    const btnY = 530;
+    const btnH = 68;
+    const btnGrad = ctx.createLinearGradient(rightX, btnY, rightX + rightW, btnY);
     btnGrad.addColorStop(0, '#0a192f');
     btnGrad.addColorStop(1, '#163a66');
     ctx.fillStyle = btnGrad;
-    ctx.shadowColor = 'rgba(10, 25, 47, 0.25)';
-    ctx.shadowBlur = 14;
-    ctx.shadowOffsetY = 5;
-    drawRoundRect(ctx, cardCenterX - btnW / 2, btnY, btnW, btnH, 25, true, false);
+    ctx.strokeStyle = '#e5b85a';
+    ctx.lineWidth = 2;
+    ctx.shadowColor = 'rgba(10, 25, 47, 0.3)';
+    ctx.shadowBlur = 18;
+    ctx.shadowOffsetY = 8;
+    drawRoundRect(ctx, rightX, btnY, rightW, btnH, 34, true, true);
     ctx.shadowColor = 'transparent';
 
+    ctx.textAlign = 'center';
     ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 15px sans-serif';
-    ctx.fillText('ORDER SEKARANG VIA BOT', cardCenterX, btnY + 31);
+    ctx.font = 'bold 18px sans-serif';
+    ctx.fillText('ORDER SEKARANG VIA BOT ➔', rightX + rightW / 2, btnY + 42);
 
     return canvas.toBuffer('image/png');
   } catch (e) {
