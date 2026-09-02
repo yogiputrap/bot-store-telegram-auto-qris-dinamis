@@ -23,9 +23,11 @@ const OtpService = require('./otp.js');
 const CodeGatraService = require('./codegatra.js');
 
 let createCanvas = null;
+let loadImage = null;
 try {
   const canvasPkg = require('canvas');
   createCanvas = canvasPkg.createCanvas;
+  loadImage = canvasPkg.loadImage;
 } catch (e) {
   // Canvas unavailable or not compiled
 }
@@ -375,78 +377,198 @@ function drawInfoBox(ctx, x, y, w, h, label, val, valColor) {
   ctx.fillText(val, x + 25, y + 58);
 }
 
+function wrapCanvasText(ctx, text, maxWidth) {
+  const words = String(text || '').trim().split(/\s+/);
+  const lines = [];
+  let currentLine = words[0] || '';
+
+  for (let i = 1; i < words.length; i++) {
+    const word = words[i];
+    const width = ctx.measureText(currentLine + ' ' + word).width;
+    if (width < maxWidth) {
+      currentLine += ' ' + word;
+    } else {
+      lines.push(currentLine);
+      currentLine = word;
+    }
+  }
+  if (currentLine) lines.push(currentLine);
+  return lines;
+}
+
 async function generateRestockCard({ productName, addedCount, totalStock, addedBy, dateStr }) {
   if (!createCanvas) return null;
   try {
-    const width = 1000;
-    const height = 700;
+    // Exact 16:9 Aspect Ratio (1376 x 768)
+    const width = 1376;
+    const height = 768;
     const canvas = createCanvas(width, height);
     const ctx = canvas.getContext('2d');
 
-    const bgGrad = ctx.createLinearGradient(0, 0, width, height);
-    bgGrad.addColorStop(0, '#051310');
-    bgGrad.addColorStop(0.5, '#0b231f');
-    bgGrad.addColorStop(1, '#061613');
-    ctx.fillStyle = bgGrad;
-    ctx.fillRect(0, 0, width, height);
-
-    ctx.strokeStyle = 'rgba(0, 242, 173, 0.05)';
-    ctx.lineWidth = 2;
-    for (let i = -200; i < width + 200; i += 40) {
-      ctx.beginPath();
-      ctx.moveTo(i, 0);
-      ctx.lineTo(i + 300, height);
-      ctx.stroke();
+    // 1. Try to load and draw the 16:9 Moakun Store background template
+    let bgLoaded = false;
+    const tmplPath = path.join(__dirname, 'assets', 'restock_template.jpg');
+    if (loadImage && fs.existsSync(tmplPath)) {
+      try {
+        const bgImg = await loadImage(tmplPath);
+        ctx.drawImage(bgImg, 0, 0, width, height);
+        bgLoaded = true;
+      } catch (err) {
+        console.warn('[LOAD RESTOCK TEMPLATE ERR]:', err.message);
+      }
     }
 
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
-    ctx.lineWidth = 1;
-    drawRoundRect(ctx, width - 260, 30, 220, 38, 19, true, true);
+    // Fallback: Draw clean matching White, Navy, & Gold 16:9 vector background
+    if (!bgLoaded) {
+      const bgGrad = ctx.createLinearGradient(0, 0, width, height);
+      bgGrad.addColorStop(0, '#ffffff');
+      bgGrad.addColorStop(0.5, '#f8fafc');
+      bgGrad.addColorStop(1, '#edf2f7');
+      ctx.fillStyle = bgGrad;
+      ctx.fillRect(0, 0, width, height);
 
-    ctx.fillStyle = '#8ea8a2';
-    ctx.font = '13px sans-serif';
+      // Ribbon Waves
+      ctx.fillStyle = '#0a192f';
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.bezierCurveTo(400, 100, 800, 50, width, 120);
+      ctx.lineTo(width, 0);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.fillStyle = '#e5b85a';
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.bezierCurveTo(380, 120, 750, 70, width, 140);
+      ctx.lineTo(width, 120);
+      ctx.bezierCurveTo(800, 50, 400, 100, 0, 0);
+      ctx.closePath();
+      ctx.fill();
+
+      // Brand Title on Left
+      ctx.fillStyle = '#0a192f';
+      ctx.font = 'bold 44px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText(config.STORE_NAME || 'MOAKUN STORE', 90, 240);
+
+      ctx.fillStyle = '#1e3a5f';
+      ctx.font = 'bold 24px sans-serif';
+      ctx.fillText('RESTOCK PRODUK TERBARU', 90, 285);
+    }
+
+    // Right Glass Card overlay coordinates
+    // In our 1376x768 template, the frosted glass card center is at x: 1045, width: 440
+    const cardCenterX = 1045;
+    const cardTopY = 175;
+    const cardWidth = 430;
+
+    // 1. Status Pill Badge (Top of right card)
+    ctx.fillStyle = 'rgba(10, 25, 47, 0.9)';
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.15)';
+    ctx.shadowBlur = 10;
+    ctx.shadowOffsetY = 4;
+    drawRoundRect(ctx, cardCenterX - 110, cardTopY, 220, 36, 18, true, false);
+    ctx.shadowColor = 'transparent';
+
+    ctx.fillStyle = '#e5b85a';
+    ctx.font = 'bold 13px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText(`🕒 ${dateStr}`, width - 150, 54);
+    ctx.fillText('✦ RESTOCK READY ✦', cardCenterX, cardTopY + 23);
 
-    ctx.fillStyle = 'rgba(0, 242, 173, 0.08)';
-    ctx.strokeStyle = '#00f2ad';
-    ctx.lineWidth = 2;
-    drawRoundRect(ctx, width / 2 - 45, 75, 90, 90, 22, true, true);
+    // 2. Product Name with dynamic font sizing & word wrapping (Bans overflow!)
+    const cleanProdName = String(productName || '').trim();
+    let fontSize = 24;
+    if (cleanProdName.length > 40) fontSize = 20;
+    else if (cleanProdName.length > 28) fontSize = 22;
 
-    ctx.fillStyle = '#00f2ad';
-    ctx.font = '40px sans-serif';
-    ctx.fillText('📦', width / 2, 133);
+    ctx.fillStyle = '#0a192f';
+    ctx.font = `bold ${fontSize}px sans-serif`;
+    const lines = wrapCanvasText(ctx, cleanProdName, cardWidth - 20);
+
+    let textY = cardTopY + 70;
+    const maxLines = 3;
+    for (let i = 0; i < Math.min(lines.length, maxLines); i++) {
+      let lineStr = lines[i];
+      if (i === maxLines - 1 && lines.length > maxLines) lineStr += '...';
+      ctx.fillText(lineStr, cardCenterX, textY);
+      textY += (fontSize + 8);
+    }
+
+    // 3. Stats Grid (2 cards: Masuk & Total Stok)
+    const statsY = Math.max(textY + 12, cardTopY + 155);
+    const boxW = 190;
+    const boxH = 88;
+    const box1X = cardCenterX - boxW - 10;
+    const box2X = cardCenterX + 10;
+
+    // Box 1: Masuk (+X pcs)
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
+    ctx.strokeStyle = 'rgba(16, 185, 129, 0.35)';
+    ctx.lineWidth = 1.5;
+    ctx.shadowColor = 'rgba(16, 185, 129, 0.12)';
+    ctx.shadowBlur = 10;
+    ctx.shadowOffsetY = 3;
+    drawRoundRect(ctx, box1X, statsY, boxW, boxH, 16, true, true);
+
+    ctx.fillStyle = '#64748b';
+    ctx.font = 'bold 12px sans-serif';
+    ctx.fillText('STOK MASUK', box1X + boxW / 2, statsY + 28);
+
+    ctx.fillStyle = '#059669';
+    ctx.font = 'bold 26px sans-serif';
+    ctx.fillText(`+${addedCount} Pcs`, box1X + boxW / 2, statsY + 65);
+
+    // Box 2: Total Tersedia (Y pcs)
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
+    ctx.strokeStyle = 'rgba(217, 119, 6, 0.35)';
+    ctx.lineWidth = 1.5;
+    ctx.shadowColor = 'rgba(217, 119, 6, 0.12)';
+    ctx.shadowBlur = 10;
+    ctx.shadowOffsetY = 3;
+    drawRoundRect(ctx, box2X, statsY, boxW, boxH, 16, true, true);
+    ctx.shadowColor = 'transparent';
+
+    ctx.fillStyle = '#64748b';
+    ctx.font = 'bold 12px sans-serif';
+    ctx.fillText('TOTAL TERSEDIA', box2X + boxW / 2, statsY + 28);
+
+    ctx.fillStyle = '#d97706';
+    ctx.font = 'bold 26px sans-serif';
+    ctx.fillText(`${totalStock} Pcs`, box2X + boxW / 2, statsY + 65);
+
+    // 4. Details info bar (Date & Admin)
+    const detailY = statsY + boxH + 18;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+    ctx.strokeStyle = 'rgba(15, 34, 63, 0.08)';
+    ctx.lineWidth = 1;
+    drawRoundRect(ctx, cardCenterX - (cardWidth / 2), detailY, cardWidth, 40, 12, true, true);
+
+    ctx.fillStyle = '#475569';
+    ctx.font = '12px sans-serif';
+    const cleanAdmin = (addedBy || 'Admin').replace('@', '');
+    ctx.fillText(`Waktu: ${dateStr}   •   Admin: @${cleanAdmin}`, cardCenterX, detailY + 25);
+
+    // 5. Call-to-action button
+    const btnY = detailY + 56;
+    const btnW = 360;
+    const btnH = 50;
+    const btnGrad = ctx.createLinearGradient(cardCenterX - btnW / 2, btnY, cardCenterX + btnW / 2, btnY);
+    btnGrad.addColorStop(0, '#0a192f');
+    btnGrad.addColorStop(1, '#163a66');
+    ctx.fillStyle = btnGrad;
+    ctx.shadowColor = 'rgba(10, 25, 47, 0.25)';
+    ctx.shadowBlur = 14;
+    ctx.shadowOffsetY = 5;
+    drawRoundRect(ctx, cardCenterX - btnW / 2, btnY, btnW, btnH, 25, true, false);
+    ctx.shadowColor = 'transparent';
 
     ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 32px sans-serif';
-    ctx.fillText(`Restock ${productName.toUpperCase()}`, width / 2, 218);
-
-    ctx.fillStyle = '#00f2ad';
-    ctx.font = 'bold 14px sans-serif';
-    ctx.fillText('❖  RESTOCK AKUN  ❖', width / 2, 248);
-
-    drawInfoBox(ctx, 80, 280, 410, 85, 'MASUK', `+${addedCount} pcs`, '#00f2ad');
-    drawInfoBox(ctx, 510, 280, 410, 85, 'STOK', `${totalStock} pcs`, '#ffcc00');
-    drawInfoBox(ctx, 80, 385, 410, 85, 'DITAMBAH', `@${addedBy.replace('@', '')}`, '#4ba3ff');
-    drawInfoBox(ctx, 510, 385, 410, 85, 'WAKTU', dateStr, '#ffffff');
-
-    const btnGrad = ctx.createLinearGradient(300, 510, 700, 510);
-    btnGrad.addColorStop(0, '#00f2ad');
-    btnGrad.addColorStop(1, '#00aaff');
-    ctx.fillStyle = btnGrad;
-    drawRoundRect(ctx, 300, 500, 400, 68, 34, true, false);
-
-    ctx.fillStyle = '#05110e';
-    ctx.font = 'bold 22px sans-serif';
-    ctx.fillText('🛒 ORDER SEKARANG!', width / 2, 542);
-
-    ctx.fillStyle = '#5c7873';
-    ctx.font = '14px sans-serif';
-    ctx.fillText(`✦  ${config.STORE_NAME || 'JEPZ STORE'}  •  Proses Otomatis 24 Jam  ✦`, width / 2, 640);
+    ctx.font = 'bold 15px sans-serif';
+    ctx.fillText('ORDER SEKARANG VIA BOT', cardCenterX, btnY + 31);
 
     return canvas.toBuffer('image/png');
   } catch (e) {
+    console.error('[GENERATE RESTOCK CARD ERR]:', e.message);
     return null;
   }
 }
