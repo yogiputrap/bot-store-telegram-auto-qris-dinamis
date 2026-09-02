@@ -313,6 +313,9 @@ class OtpService {
                   await bot.sendMessage(order.telegram_id, doneText, { parse_mode: 'HTML' });
                 } catch (e) {}
 
+                const cleanBuyer = (order.username || 'Buyer').replace(/^@/, '');
+                const maskedUser = cleanBuyer.length <= 2 ? `@${cleanBuyer}xxx` : `@${cleanBuyer.slice(0, 2)}xxx`;
+
                 // Send Receipt / Testimonial to Channel
                 const dateStr = getShortTimeString ? getShortTimeString() : new Date().toLocaleString();
                 const cardBuffer = await this.generateOtpTestimonialCard({
@@ -320,10 +323,10 @@ class OtpService {
                   phoneNumber: sData.phone_number || order.phone_number,
                   otpCode: sData.otp_code,
                   dateStr: dateStr,
-                  userUsername: order.username || 'Buyer'
+                  userUsername: maskedUser
                 });
 
-                const cardCaption = `🚀 <b>TESTIMONI / RECEIPT OTP SUKSES!</b>\n\nSatu pesanan virtual SMS OTP telah berhasil diterima.\n\n📱 <b>Layanan:</b> ${sData.service || order.service_name}\n🌐 <b>Status:</b> Success Completed\n\nTerima kasih telah mempercayai <b>${config.STORE_NAME}</b>!`;
+                const cardCaption = `🚀 <b>TESTIMONI / RECEIPT OTP SUKSES!</b>\n\n🧾 <b>Order ID:</b> <code>#${order.order_code}</code>\n📱 <b>Layanan:</b> ${sData.service || order.service_name}\n💳 <b>Metode:</b> <b>Saldo Akun (Balance)</b>\n👤 <b>Pembeli:</b> ${maskedUser}\n🌐 <b>Status:</b> Success Completed\n\nTerima kasih telah mempercayai <b>${config.STORE_NAME}</b>!`;
 
                 if (config.CHANNEL_ID && config.CHANNEL_ID.startsWith('-100')) {
                   try {

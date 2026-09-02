@@ -2794,6 +2794,24 @@ bot.on('callback_query', async (query) => {
       successMsg += `Terima kasih telah berbelanja di <b>${config.STORE_NAME}</b>!`;
 
       bot.sendMessage(chatId, successMsg, { parse_mode: 'HTML' });
+
+      // Send Testimonial to channel
+      if (config.CHANNEL_ID && String(config.CHANNEL_ID).startsWith('-100')) {
+        try {
+          const buyerDisplay = user.username ? `@${user.username}` : (user.first_name || 'Buyer');
+          const maskedBuyer = CodeGatraService.maskBuyerUsername(buyerDisplay);
+          let chMsg = `🛍️ <b>TRANSAKSI SALDO AKUN SUKSES!</b>\n\n`;
+          chMsg += `🧾 <b>Order ID:</b> <code>#${orderCode}</code>\n`;
+          chMsg += `📦 <b>Produk:</b> ${product.category} - ${product.name}\n`;
+          chMsg += `📊 <b>Jumlah:</b> ${qty} Pcs\n`;
+          chMsg += `💰 <b>Total:</b> ${formatRupiah(finalTotal)}\n`;
+          chMsg += `💳 <b>Metode:</b> <b>Saldo Akun (Balance)</b>\n`;
+          chMsg += `👤 <b>Pembeli:</b> ${maskedBuyer}\n`;
+          chMsg += `⚡ <b>Proses:</b> Instan 24 Jam Otomatis`;
+          await bot.sendMessage(config.CHANNEL_ID, chMsg, { parse_mode: 'HTML' });
+        } catch (e) {}
+      }
+
       return bot.answerCallbackQuery(query.id);
     } catch (err) {
       bot.sendMessage(chatId, `❌ Terjadi kesalahan saat memproses transaksi: ${err.message}`);

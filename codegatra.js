@@ -40,6 +40,16 @@ class CodeGatraService {
     }
   }
 
+  // Helper: Mask username or name for privacy in public channels (e.g. yopratama -> @yoxxx)
+  static maskBuyerUsername(rawName) {
+    if (!rawName) return '@Userxxx';
+    let str = String(rawName).trim();
+    const clean = str.replace(/^@/, '');
+    if (clean.length === 0) return '@Userxxx';
+    if (clean.length <= 2) return `@${clean}xxx`;
+    return `@${clean.slice(0, 2)}xxx`;
+  }
+
   // Helper: Calculate CRC16 CCITT (0xFFFF, Poly 0x1021) for EMVCo QRIS
   static crc16(str) {
     let crc = 0xFFFF;
@@ -446,7 +456,14 @@ class CodeGatraService {
             // Notify Channel if configured
             if (config.CHANNEL_ID && String(config.CHANNEL_ID).startsWith('-100')) {
               try {
-                const chMsg = `⚡ <b>AUTO DEPOSIT MASUK!</b>\n\nNominal: <b>${formatRupiah(dep.amount)}</b>\nUser: @${dep.username || 'User'}\nMetode: <b>QRIS Otomatis</b>\nStatus: <b>SUCCESS</b>`;
+                const buyerDisplay = dep.username ? `@${dep.username}` : 'User';
+                const maskedUser = CodeGatraService.maskBuyerUsername(buyerDisplay);
+                let chMsg = `⚡ <b>AUTO DEPOSIT MASUK!</b>\n\n`;
+                chMsg += `🧾 <b>Deposit ID:</b> <code>#${dep.deposit_code}</code>\n`;
+                chMsg += `💰 <b>Nominal:</b> <b>${formatRupiah(dep.amount)}</b>\n`;
+                chMsg += `💳 <b>Metode:</b> <b>QRIS Otomatis</b>\n`;
+                chMsg += `👤 <b>User:</b> ${maskedUser}\n`;
+                chMsg += `⚡ <b>Status:</b> SUCCESS (Otomatis)`;
                 await bot.sendMessage(config.CHANNEL_ID, chMsg, { parse_mode: 'HTML' });
               } catch (e) {}
             }
@@ -595,7 +612,16 @@ class CodeGatraService {
             // Send Testimonial to channel
             if (config.CHANNEL_ID && String(config.CHANNEL_ID).startsWith('-100')) {
               try {
-                const chMsg = `🛍️ <b>TRANSAKSI QRIS OTOMATIS SUKSES!</b>\n\n📦 <b>Produk:</b> ${pay.category} - ${pay.prod_name} (${reqQty} Pcs)\n💰 <b>Total:</b> ${formatRupiah(pay.amount)}\n👤 <b>Pembeli:</b> @${pay.username || 'Buyer'}\n⚡ <b>Proses:</b> Instan 24 Jam Otomatis`;
+                const buyerDisplay = pay.username ? `@${pay.username}` : (pay.customer_name || 'Buyer');
+                const maskedBuyer = CodeGatraService.maskBuyerUsername(buyerDisplay);
+                let chMsg = `🛍️ <b>TRANSAKSI QRIS OTOMATIS SUKSES!</b>\n\n`;
+                chMsg += `🧾 <b>Order ID:</b> <code>#${pay.order_code}</code>\n`;
+                chMsg += `📦 <b>Produk:</b> ${pay.category} - ${pay.prod_name}\n`;
+                chMsg += `📊 <b>Jumlah:</b> ${reqQty} Pcs\n`;
+                chMsg += `💰 <b>Total:</b> ${formatRupiah(pay.total_amount || pay.amount)}\n`;
+                chMsg += `💳 <b>Metode:</b> <b>QRIS Otomatis</b>\n`;
+                chMsg += `👤 <b>Pembeli:</b> ${maskedBuyer}\n`;
+                chMsg += `⚡ <b>Proses:</b> Instan 24 Jam Otomatis`;
                 await bot.sendMessage(config.CHANNEL_ID, chMsg, { parse_mode: 'HTML' });
               } catch (e) {}
             }
