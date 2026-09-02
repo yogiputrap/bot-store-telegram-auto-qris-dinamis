@@ -614,14 +614,16 @@ class CodeGatraService {
               try {
                 const buyerDisplay = pay.username ? `@${pay.username}` : (pay.customer_name || 'Buyer');
                 const maskedBuyer = CodeGatraService.maskBuyerUsername(buyerDisplay);
-                let chMsg = `🛍️ <b>TRANSAKSI QRIS OTOMATIS SUKSES!</b>\n\n`;
+                let chMsg = `🛍️ <b>TRANSAKSI SUKSES!</b>\n\n`;
                 chMsg += `🧾 <b>Order ID:</b> <code>#${pay.order_code}</code>\n`;
                 chMsg += `📦 <b>Produk:</b> ${pay.category} - ${pay.prod_name}\n`;
                 chMsg += `📊 <b>Jumlah:</b> ${reqQty} Pcs\n`;
                 chMsg += `💰 <b>Total:</b> ${formatRupiah(pay.total_amount || pay.amount)}\n`;
                 chMsg += `💳 <b>Metode:</b> <b>QRIS Otomatis</b>\n`;
                 chMsg += `👤 <b>Pembeli:</b> ${maskedBuyer}\n`;
-                chMsg += `⚡ <b>Proses:</b> Instan 24 Jam Otomatis`;
+                chMsg += `⚡ <b>Proses:</b> Instan 24 Jam Otomatis\n\n`;
+                chMsg += `━━━━━━━━━━━━━━━━━━\n`;
+                chMsg += `<i>Terima kasih banyak sudah berbelanja di <b>${config.STORE_NAME || 'Moakun Store'}</b>! Semoga produknya bermanfaat, rezekinya makin lancar, dan sehat selalu ya kak 🙏✨</i>`;
                 await bot.sendMessage(config.CHANNEL_ID, chMsg, { parse_mode: 'HTML' });
               } catch (e) {}
             }
