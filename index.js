@@ -2330,6 +2330,8 @@ bot.on('callback_query', async (query) => {
     const result = await CodeGatraService.processSingleProductPayment(pay, { bot, dbRun, dbGet, dbAll, dbTransaction, formatRupiah });
     if (result.status === 'paid') {
       return bot.answerCallbackQuery(query.id, { text: '🎉 Pembayaran terdeteksi LUNAS! Akun Anda telah dikirim.', show_alert: true });
+    } else if (result.status === 'processing') {
+      return bot.answerCallbackQuery(query.id, { text: '⏳ Pembayaran sedang diproses & akun sedang dikirim...', show_alert: true });
     } else if (result.status === 'expired') {
       return bot.answerCallbackQuery(query.id, { text: '⚠️ Pembayaran telah kadaluarsa.', show_alert: true });
     } else {
@@ -2385,6 +2387,8 @@ bot.on('callback_query', async (query) => {
     const result = await CodeGatraService.processSingleDeposit(dep, { bot, dbRun, dbGet, dbAll, dbTransaction, formatRupiah });
     if (result.status === 'paid') {
       return bot.answerCallbackQuery(query.id, { text: '🎉 Deposit BERHASIL! Saldo Anda telah otomatis ditambahkan.', show_alert: true });
+    } else if (result.status === 'processing') {
+      return bot.answerCallbackQuery(query.id, { text: '⏳ Deposit sedang diproses, saldo sedang ditambahkan...', show_alert: true });
     } else if (result.status === 'expired') {
       return bot.answerCallbackQuery(query.id, { text: '⚠️ Deposit telah kadaluarsa.', show_alert: true });
     } else {

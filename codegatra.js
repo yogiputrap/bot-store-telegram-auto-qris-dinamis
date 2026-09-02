@@ -2,6 +2,9 @@ const axios = require('axios');
 const QRCode = require('qrcode');
 const config = require('./config.js');
 
+const activePaymentLocks = new Set();
+const activeDepositLocks = new Set();
+
 class CodeGatraService {
   static getClient() {
     return axios.create({
@@ -382,38 +385,61 @@ class CodeGatraService {
 
   // Process a single deposit payment (shared between background polling and manual refresh)
   static async processSingleDeposit(dep, { bot, dbRun, dbGet, dbAll, dbTransaction, formatRupiah }) {
+    if (activeDepositLocks.has(dep.id)) {
+      return { status: 'processing', message: 'Deposit sedang diproses...' };
+    }
+    activeDepositLocks.add(dep.id);
+
     try {
+      // Re-check deposit status in DB before processing
+      const currentDep = await dbGet('SELECT status FROM deposits WHERE id = ?', [dep.id]);
+      if (!currentDep || currentDep.status === 'approved') {
+        return { status: 'paid', message: 'Deposit sudah berhasil diproses.' };
+      }
+      if (currentDep.status === 'expired' || currentDep.status === 'cancelled') {
+        return { status: currentDep.status, message: 'Deposit sudah tidak aktif.' };
+      }
+
       const statusRes = await this.checkStatus(dep.ref_id);
       if (statusRes.status === 'success') {
         if (statusRes.payment_status === 'paid') {
+          let depositConfirmed = false;
+
           // Confirm deposit atomically
-          await dbTransaction(async ({ dbRun }) => {
+          await dbTransaction(async ({ dbRun, dbGet }) => {
+            const checkD = await dbGet('SELECT status FROM deposits WHERE id = ?', [dep.id]);
+            if (checkD.status === 'approved') return;
+
             await dbRun(`UPDATE deposits SET status = 'approved', confirmed_at = DATETIME('now', 'localtime') WHERE id = ?`, [dep.id]);
             await dbRun(`UPDATE users SET balance = balance + ? WHERE id = ?`, [dep.amount, dep.user_id]);
             await dbRun(
               `INSERT INTO balance_history (user_id, amount, type, description) VALUES (?, ?, 'DEPOSIT', ?)`,
               [dep.user_id, dep.amount, `Auto Deposit QRIS #${dep.deposit_code}`]
             );
+            depositConfirmed = true;
           });
 
-          // Notify User
-          const newBalance = (dep.user_balance || 0) + dep.amount;
-          let successMsg = `🎉 <b>DEPOSIT QRIS BERHASIL OTOMATIS!</b>\n\n`;
-          successMsg += `Deposit Code: <code>#${dep.deposit_code}</code>\n`;
-          successMsg += `Nominal Masuk: <b>${formatRupiah(dep.amount)}</b>\n`;
-          successMsg += `Saldo Saat Ini: <b>${formatRupiah(newBalance)}</b>\n\n`;
-          successMsg += `Terima kasih! Saldo Anda telah otomatis ditambahkan dan siap digunakan.`;
+          if (depositConfirmed) {
+            // Notify User
+            const userRow = await dbGet('SELECT balance FROM users WHERE id = ?', [dep.user_id]);
+            const newBalance = userRow ? userRow.balance : ((dep.user_balance || 0) + dep.amount);
+            let successMsg = `🎉 <b>DEPOSIT QRIS BERHASIL OTOMATIS!</b>\n\n`;
+            successMsg += `Deposit Code: <code>#${dep.deposit_code}</code>\n`;
+            successMsg += `Nominal Masuk: <b>${formatRupiah(dep.amount)}</b>\n`;
+            successMsg += `Saldo Saat Ini: <b>${formatRupiah(newBalance)}</b>\n\n`;
+            successMsg += `Terima kasih! Saldo Anda telah otomatis ditambahkan dan siap digunakan.`;
 
-          try {
-            await bot.sendMessage(dep.telegram_id, successMsg, { parse_mode: 'HTML' });
-          } catch (e) {}
-
-          // Notify Channel if configured
-          if (config.CHANNEL_ID && config.CHANNEL_ID.startsWith('-100')) {
             try {
-              const chMsg = `⚡ <b>AUTO DEPOSIT MASUK!</b>\n\nNominal: <b>${formatRupiah(dep.amount)}</b>\nUser: @${dep.username || 'User'}\nMetode: <b>QRIS Otomatis</b>\nStatus: <b>SUCCESS</b>`;
-              await bot.sendMessage(config.CHANNEL_ID, chMsg, { parse_mode: 'HTML' });
+              await bot.sendMessage(dep.telegram_id, successMsg, { parse_mode: 'HTML' });
             } catch (e) {}
+
+            // Notify Channel if configured
+            if (config.CHANNEL_ID && String(config.CHANNEL_ID).startsWith('-100')) {
+              try {
+                const chMsg = `⚡ <b>AUTO DEPOSIT MASUK!</b>\n\nNominal: <b>${formatRupiah(dep.amount)}</b>\nUser: @${dep.username || 'User'}\nMetode: <b>QRIS Otomatis</b>\nStatus: <b>SUCCESS</b>`;
+                await bot.sendMessage(config.CHANNEL_ID, chMsg, { parse_mode: 'HTML' });
+              } catch (e) {}
+            }
           }
           return { status: 'paid', message: 'Deposit berhasil diverifikasi dan saldo telah masuk!' };
         } else if (statusRes.payment_status === 'expired' || statusRes.payment_status === 'cancelled') {
@@ -430,59 +456,89 @@ class CodeGatraService {
     } catch (err) {
       console.error(`[PROCESS DEPOSIT ERR #${dep.deposit_code}]:`, err.message);
       return { status: 'error', message: err.message };
+    } finally {
+      activeDepositLocks.delete(dep.id);
     }
   }
 
   // Process a single product order payment (shared between background polling and manual refresh)
   static async processSingleProductPayment(pay, { bot, dbRun, dbGet, dbAll, dbTransaction, formatRupiah }) {
+    if (activePaymentLocks.has(pay.id)) {
+      return { status: 'processing', message: 'Pembayaran sedang diproses...' };
+    }
+    activePaymentLocks.add(pay.id);
+
     try {
+      // Re-check payment and order status in DB before processing
+      const currentPay = await dbGet('SELECT status FROM payments WHERE id = ?', [pay.id]);
+      const currentOrder = await dbGet('SELECT status FROM orders WHERE id = ?', [pay.order_id]);
+      if (!currentPay || currentPay.status === 'paid' || (currentOrder && currentOrder.status === 'completed')) {
+        return { status: 'paid', message: 'Pesanan sudah selesai diproses.' };
+      }
+      if (currentPay.status === 'expired' || currentPay.status === 'cancelled') {
+        return { status: currentPay.status, message: 'Pesanan sudah tidak aktif.' };
+      }
+
       const statusRes = await this.checkStatus(pay.ref_id);
       if (statusRes.status === 'success') {
         if (statusRes.payment_status === 'paid') {
           const reqQty = pay.qty || 1;
+          let fulfilledItems = null;
+          let needStockAlert = false;
 
-          // Fulfill order atomically
-          const stockItems = await dbAll(`
-            SELECT * FROM product_stock 
-            WHERE product_id = ? AND status = 'available' 
-            ORDER BY id ASC LIMIT ?
-          `, [pay.product_id, reqQty]);
+          // Fulfill order atomically inside transaction
+          await dbTransaction(async ({ dbRun, dbGet, dbAll }) => {
+            const checkOrder = await dbGet('SELECT status FROM orders WHERE id = ?', [pay.order_id]);
+            if (checkOrder.status === 'completed' || checkOrder.status === 'paid_stock_pending') {
+              return;
+            }
 
-          if (stockItems.length < reqQty) {
-            // Mark as paid but stock issue -> alert owner
+            const stockItems = await dbAll(`
+              SELECT * FROM product_stock 
+              WHERE product_id = ? AND status = 'available' 
+              ORDER BY id ASC LIMIT ?
+            `, [pay.product_id, reqQty]);
+
+            if (stockItems.length < reqQty) {
+              await dbRun(`UPDATE payments SET status = 'paid', confirmed_at = DATETIME('now', 'localtime') WHERE id = ?`, [pay.id]);
+              await dbRun(`UPDATE orders SET status = 'paid_stock_pending' WHERE id = ?`, [pay.order_id]);
+              needStockAlert = true;
+              return;
+            }
+
+            for (const item of stockItems) {
+              await dbRun(
+                `UPDATE product_stock SET status = 'sold', order_id = ?, sold_at = DATETIME('now', 'localtime') WHERE id = ?`,
+                [pay.order_code, item.id]
+              );
+            }
             await dbRun(`UPDATE payments SET status = 'paid', confirmed_at = DATETIME('now', 'localtime') WHERE id = ?`, [pay.id]);
-            await dbRun(`UPDATE orders SET status = 'paid_stock_pending' WHERE id = ?`, [pay.order_id]);
+            await dbRun(`UPDATE orders SET status = 'completed', stock_id = ?, completed_at = DATETIME('now', 'localtime') WHERE id = ?`, [stockItems[0].id, pay.order_id]);
 
-            const alertOwner = `⚠️ <b>PEMBAYARAN QRIS SUKSES, TAPI STOK KURANG!</b>\n\nOrder Code: <code>#${pay.order_code}</code>\nProduk: <b>${pay.category} - ${pay.prod_name}</b>\nJumlah diminta: ${reqQty}, Tersedia: ${stockItems.length}\nUser: @${pay.username || 'User'} (<code>${pay.telegram_id}</code>)\n\nHarap kirim akun manual ke pembeli!`;
+            if (pay.voucher_code) {
+              const v = await dbGet('SELECT * FROM vouchers WHERE code = ?', [pay.voucher_code]);
+              if (v) {
+                await dbRun(
+                  'INSERT INTO voucher_usages (voucher_id, user_id, order_code, discount_amount) VALUES (?, ?, ?, ?)',
+                  [v.id, pay.user_id, pay.order_code, pay.discount_amount || 0]
+                );
+                await dbRun('UPDATE vouchers SET used_count = used_count + 1 WHERE id = ?', [v.id]);
+              }
+            }
+
+            fulfilledItems = stockItems;
+          });
+
+          if (needStockAlert) {
+            const alertOwner = `⚠️ <b>PEMBAYARAN QRIS SUKSES, TAPI STOK KURANG!</b>\n\nOrder Code: <code>#${pay.order_code}</code>\nProduk: <b>${pay.category} - ${pay.prod_name}</b>\nJumlah diminta: ${reqQty}\nUser: @${pay.username || 'User'} (<code>${pay.telegram_id}</code>)\n\nHarap kirim akun manual ke pembeli!`;
             try {
               await bot.sendMessage(config.OWNER_ID, alertOwner, { parse_mode: 'HTML' });
               await bot.sendMessage(pay.telegram_id, `🎉 <b>PEMBAYARAN QRIS TERKONFIRMASI!</b>\n\nOrder <code>#${pay.order_code}</code> telah lunas. Stok sedang disiapkan oleh admin dan akan segera dikirimkan.`, { parse_mode: 'HTML' });
             } catch (e) {}
             return { status: 'paid', message: 'Pembayaran sukses, stok sedang disiapkan admin!' };
-          } else {
-            // Stock is available -> fulfill immediately
-            await dbTransaction(async ({ dbRun }) => {
-              for (const item of stockItems) {
-                await dbRun(
-                  `UPDATE product_stock SET status = 'sold', order_id = ?, sold_at = DATETIME('now', 'localtime') WHERE id = ?`,
-                  [pay.order_code, item.id]
-                );
-              }
-              await dbRun(`UPDATE payments SET status = 'paid', confirmed_at = DATETIME('now', 'localtime') WHERE id = ?`, [pay.id]);
-              await dbRun(`UPDATE orders SET status = 'completed', stock_id = ?, completed_at = DATETIME('now', 'localtime') WHERE id = ?`, [stockItems[0].id, pay.order_id]);
+          }
 
-              if (pay.voucher_code) {
-                const v = await dbGet('SELECT * FROM vouchers WHERE code = ?', [pay.voucher_code]);
-                if (v) {
-                  await dbRun(
-                    'INSERT INTO voucher_usages (voucher_id, user_id, order_code, discount_amount) VALUES (?, ?, ?, ?)',
-                    [v.id, pay.user_id, pay.order_code, pay.discount_amount || 0]
-                  );
-                  await dbRun('UPDATE vouchers SET used_count = used_count + 1 WHERE id = ?', [v.id]);
-                }
-              }
-            });
-
+          if (fulfilledItems && fulfilledItems.length > 0) {
             // Send credentials to buyer
             let successMsg = `🎉 <b>PEMBAYARAN QRIS BERHASIL (${reqQty} Pcs)</b>\n\n`;
             successMsg += `Order Code: <code>#${pay.order_code}</code>\n`;
@@ -491,7 +547,7 @@ class CodeGatraService {
             successMsg += `━━━━━━━━━━━━━━━━━━\n`;
             successMsg += `📦 <b>DETAIL AKUN / CREDENTIAL (${reqQty} Pcs):</b>\n\n`;
 
-            stockItems.forEach((item, index) => {
+            fulfilledItems.forEach((item, index) => {
               successMsg += `<b>[${index + 1}]</b>\n`;
               successMsg += `📧 <b>Email:</b> <code>${item.email}</code>\n`;
               successMsg += `🔑 <b>Password:</b> <code>${item.password}</code>\n`;
@@ -508,7 +564,7 @@ class CodeGatraService {
             } catch (e) {}
 
             // Send Testimonial to channel
-            if (config.CHANNEL_ID && config.CHANNEL_ID.startsWith('-100')) {
+            if (config.CHANNEL_ID && String(config.CHANNEL_ID).startsWith('-100')) {
               try {
                 const chMsg = `🛍️ <b>TRANSAKSI QRIS OTOMATIS SUKSES!</b>\n\n📦 <b>Produk:</b> ${pay.category} - ${pay.prod_name} (${reqQty} Pcs)\n💰 <b>Total:</b> ${formatRupiah(pay.amount)}\n👤 <b>Pembeli:</b> @${pay.username || 'Buyer'}\n⚡ <b>Proses:</b> Instan 24 Jam Otomatis`;
                 await bot.sendMessage(config.CHANNEL_ID, chMsg, { parse_mode: 'HTML' });
@@ -516,6 +572,8 @@ class CodeGatraService {
             }
             return { status: 'paid', message: 'Pembayaran sukses & produk berhasil dikirim!' };
           }
+
+          return { status: 'paid', message: 'Pesanan telah selesai diproses.' };
         } else if (statusRes.payment_status === 'expired' || statusRes.payment_status === 'cancelled') {
           await dbRun(`UPDATE payments SET status = 'expired' WHERE id = ?`, [pay.id]);
           await dbRun(`UPDATE orders SET status = 'expired' WHERE id = ?`, [pay.order_id]);
@@ -531,6 +589,8 @@ class CodeGatraService {
     } catch (err) {
       console.error(`[PROCESS PAYMENT ERR #${pay.order_code}]:`, err.message);
       return { status: 'error', message: err.message };
+    } finally {
+      activePaymentLocks.delete(pay.id);
     }
   }
 
