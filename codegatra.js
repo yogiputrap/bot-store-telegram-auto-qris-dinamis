@@ -420,6 +420,11 @@ class CodeGatraService {
           });
 
           if (depositConfirmed) {
+            // Delete the QRIS invoice message so chat is clean and cannot be rescanned
+            if (dep.message_id) {
+              try { await bot.deleteMessage(dep.telegram_id, dep.message_id); } catch(e) {}
+            }
+
             // Notify User
             const userRow = await dbGet('SELECT balance FROM users WHERE id = ?', [dep.user_id]);
             const newBalance = userRow ? userRow.balance : ((dep.user_balance || 0) + dep.amount);
@@ -444,6 +449,9 @@ class CodeGatraService {
           return { status: 'paid', message: 'Deposit berhasil diverifikasi dan saldo telah masuk!' };
         } else if (statusRes.payment_status === 'expired' || statusRes.payment_status === 'cancelled') {
           await dbRun(`UPDATE deposits SET status = 'expired' WHERE id = ?`, [dep.id]);
+          if (dep.message_id) {
+            try { await bot.deleteMessage(dep.telegram_id, dep.message_id); } catch(e) {}
+          }
           try {
             await bot.sendMessage(dep.telegram_id, `⚠️ <b>DEPOSIT EXPIRED / KADALUARSA</b>\n\nKode Deposit <code>#${dep.deposit_code}</code> telah kadaluarsa. Silakan lakukan deposit ulang jika ingin mengisi saldo.`, { parse_mode: 'HTML' });
           } catch (e) {}
@@ -529,6 +537,11 @@ class CodeGatraService {
             fulfilledItems = stockItems;
           });
 
+          // Delete the QRIS invoice message so chat is clean and cannot be rescanned
+          if (pay.message_id) {
+            try { await bot.deleteMessage(pay.telegram_id, pay.message_id); } catch(e) {}
+          }
+
           if (needStockAlert) {
             const alertOwner = `⚠️ <b>PEMBAYARAN QRIS SUKSES, TAPI STOK KURANG!</b>\n\nOrder Code: <code>#${pay.order_code}</code>\nProduk: <b>${pay.category} - ${pay.prod_name}</b>\nJumlah diminta: ${reqQty}\nUser: @${pay.username || 'User'} (<code>${pay.telegram_id}</code>)\n\nHarap kirim akun manual ke pembeli!`;
             try {
@@ -577,6 +590,9 @@ class CodeGatraService {
         } else if (statusRes.payment_status === 'expired' || statusRes.payment_status === 'cancelled') {
           await dbRun(`UPDATE payments SET status = 'expired' WHERE id = ?`, [pay.id]);
           await dbRun(`UPDATE orders SET status = 'expired' WHERE id = ?`, [pay.order_id]);
+          if (pay.message_id) {
+            try { await bot.deleteMessage(pay.telegram_id, pay.message_id); } catch(e) {}
+          }
           try {
             await bot.sendMessage(pay.telegram_id, `⚠️ <b>PEMBAYARAN QRIS EXPIRED</b>\n\nPembayaran untuk order <code>#${pay.order_code}</code> telah kadaluarsa. Silakan lakukan order baru jika ingin membeli.`, { parse_mode: 'HTML' });
           } catch (e) {}

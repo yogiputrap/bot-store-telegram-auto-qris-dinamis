@@ -275,7 +275,7 @@ async function sendQrPhotoOrMessage(chatId, paymentObj, captionText, replyMarkup
         const photoOptions = { caption: caption, parse_mode: 'HTML' };
         if (safeMarkup) photoOptions.reply_markup = safeMarkup;
 
-        await bot.sendPhoto(
+        const sent = await bot.sendPhoto(
           chatId,
           photoBuffer,
           photoOptions,
@@ -284,7 +284,7 @@ async function sendQrPhotoOrMessage(chatId, paymentObj, captionText, replyMarkup
         if (extraText) {
           await bot.sendMessage(chatId, extraText, { parse_mode: 'HTML', reply_markup: safeMarkup });
         }
-        return;
+        return sent;
       } catch (sendPhotoErr) {
         console.warn('[SEND PHOTO RETRY 1]: HTML caption failed, retrying plain text...', sendPhotoErr.message);
 
@@ -294,7 +294,7 @@ async function sendQrPhotoOrMessage(chatId, paymentObj, captionText, replyMarkup
           const photoOptions = { caption: plainCaption };
           if (safeMarkup) photoOptions.reply_markup = safeMarkup;
 
-          await bot.sendPhoto(
+          const sent = await bot.sendPhoto(
             chatId,
             photoBuffer,
             photoOptions,
@@ -303,20 +303,20 @@ async function sendQrPhotoOrMessage(chatId, paymentObj, captionText, replyMarkup
           if (extraText) {
             await bot.sendMessage(chatId, extraText, { parse_mode: 'HTML', reply_markup: safeMarkup });
           }
-          return;
+          return sent;
         } catch (plainErr) {
           console.warn('[SEND PHOTO RETRY 2]: Retrying photo without caption...', plainErr.message);
 
           // Attempt 3: Send photo alone, then send caption text
           try {
-            await bot.sendPhoto(
+            const sent = await bot.sendPhoto(
               chatId,
               photoBuffer,
               {},
               { filename: `qris_${Date.now()}.png`, contentType: 'image/png' }
             );
             await bot.sendMessage(chatId, captionText, { parse_mode: 'HTML', reply_markup: safeMarkup });
-            return;
+            return sent;
           } catch (photoOnlyErr) {
             console.error('[SEND PHOTO RETRY 3 FAILED]:', photoOnlyErr.message);
           }
@@ -328,7 +328,7 @@ async function sendQrPhotoOrMessage(chatId, paymentObj, captionText, replyMarkup
   }
 
   // Fallback to text message if photo could not be delivered
-  await bot.sendMessage(chatId, captionText, { parse_mode: 'HTML', reply_markup: safeMarkup });
+  return await bot.sendMessage(chatId, captionText, { parse_mode: 'HTML', reply_markup: safeMarkup });
 }
 
 // RATE-LIMITED MESSAGE SENDER FOR SAFE BROADCAST (35ms delay)
@@ -1498,7 +1498,10 @@ bot.on('message', async (msg) => {
         ]
       };
 
-      await sendQrPhotoOrMessage(chatId, deposit, depMsg, depButtons);
+      const sentDepQr = await sendQrPhotoOrMessage(chatId, deposit, depMsg, depButtons);
+      if (sentDepQr && sentDepQr.message_id) {
+        await dbRun('UPDATE deposits SET message_id = ? WHERE deposit_code = ?', [sentDepQr.message_id, deposit.depositCode]);
+      }
       return;
     }
 
@@ -2316,23 +2319,28 @@ bot.on('callback_query', async (query) => {
     }
 
     if (pay.order_status === 'completed' || pay.status === 'paid') {
+      try { await bot.deleteMessage(chatId, messageId); } catch(e) {}
       return bot.answerCallbackQuery(query.id, { text: '✅ Pembayaran SUKSES & pesanan telah selesai dikirim!', show_alert: true });
     }
 
     if (pay.order_status === 'cancelled' || pay.status === 'cancelled') {
+      try { await bot.deleteMessage(chatId, messageId); } catch(e) {}
       return bot.answerCallbackQuery(query.id, { text: '❌ Pesanan ini telah dibatalkan.', show_alert: true });
     }
 
     if (pay.order_status === 'expired' || pay.status === 'expired') {
+      try { await bot.deleteMessage(chatId, messageId); } catch(e) {}
       return bot.answerCallbackQuery(query.id, { text: '⚠️ Waktu pembayaran telah kadaluarsa.', show_alert: true });
     }
 
     const result = await CodeGatraService.processSingleProductPayment(pay, { bot, dbRun, dbGet, dbAll, dbTransaction, formatRupiah });
     if (result.status === 'paid') {
+      try { await bot.deleteMessage(chatId, messageId); } catch(e) {}
       return bot.answerCallbackQuery(query.id, { text: '🎉 Pembayaran terdeteksi LUNAS! Akun Anda telah dikirim.', show_alert: true });
     } else if (result.status === 'processing') {
       return bot.answerCallbackQuery(query.id, { text: '⏳ Pembayaran sedang diproses & akun sedang dikirim...', show_alert: true });
     } else if (result.status === 'expired') {
+      try { await bot.deleteMessage(chatId, messageId); } catch(e) {}
       return bot.answerCallbackQuery(query.id, { text: '⚠️ Pembayaran telah kadaluarsa.', show_alert: true });
     } else {
       return bot.answerCallbackQuery(query.id, { text: '⏳ Pembayaran belum terdeteksi. Silakan transfer sesuai total nominal (termasuk kode unik).', show_alert: true });
@@ -2346,15 +2354,18 @@ bot.on('callback_query', async (query) => {
       return bot.answerCallbackQuery(query.id, { text: 'Pesanan tidak ditemukan.', show_alert: true });
     }
     if (order.status === 'completed') {
+      try { await bot.deleteMessage(chatId, messageId); } catch(e) {}
       return bot.answerCallbackQuery(query.id, { text: 'Pesanan sudah selesai dan tidak dapat dibatalkan.', show_alert: true });
     }
     if (order.status === 'cancelled') {
+      try { await bot.deleteMessage(chatId, messageId); } catch(e) {}
       return bot.answerCallbackQuery(query.id, { text: 'Pesanan sudah dibatalkan sebelumnya.', show_alert: true });
     }
 
     await dbRun("UPDATE orders SET status = 'cancelled' WHERE id = ?", [order.id]);
     await dbRun("UPDATE payments SET status = 'cancelled' WHERE order_id = ?", [order.id]);
 
+    try { await bot.deleteMessage(chatId, messageId); } catch(e) {}
     bot.answerCallbackQuery(query.id, { text: '❌ Pesanan berhasil dibatalkan.' });
     return bot.sendMessage(chatId, `❌ <b>PESANAN DIBATALKAN</b>\n\nOrder <code>#${orderCode}</code> telah berhasil dibatalkan.\nSilakan gunakan menu /start untuk melihat produk lainnya.`, { parse_mode: 'HTML' });
   }
@@ -2373,23 +2384,28 @@ bot.on('callback_query', async (query) => {
     }
 
     if (dep.status === 'approved') {
+      try { await bot.deleteMessage(chatId, messageId); } catch(e) {}
       return bot.answerCallbackQuery(query.id, { text: '✅ Deposit SUKSES & saldo sudah masuk ke akun Anda!', show_alert: true });
     }
 
     if (dep.status === 'cancelled') {
+      try { await bot.deleteMessage(chatId, messageId); } catch(e) {}
       return bot.answerCallbackQuery(query.id, { text: '❌ Deposit ini telah dibatalkan.', show_alert: true });
     }
 
     if (dep.status === 'expired') {
+      try { await bot.deleteMessage(chatId, messageId); } catch(e) {}
       return bot.answerCallbackQuery(query.id, { text: '⚠️ Deposit telah kadaluarsa.', show_alert: true });
     }
 
     const result = await CodeGatraService.processSingleDeposit(dep, { bot, dbRun, dbGet, dbAll, dbTransaction, formatRupiah });
     if (result.status === 'paid') {
+      try { await bot.deleteMessage(chatId, messageId); } catch(e) {}
       return bot.answerCallbackQuery(query.id, { text: '🎉 Deposit BERHASIL! Saldo Anda telah otomatis ditambahkan.', show_alert: true });
     } else if (result.status === 'processing') {
       return bot.answerCallbackQuery(query.id, { text: '⏳ Deposit sedang diproses, saldo sedang ditambahkan...', show_alert: true });
     } else if (result.status === 'expired') {
+      try { await bot.deleteMessage(chatId, messageId); } catch(e) {}
       return bot.answerCallbackQuery(query.id, { text: '⚠️ Deposit telah kadaluarsa.', show_alert: true });
     } else {
       return bot.answerCallbackQuery(query.id, { text: '⏳ Pembayaran deposit belum terdeteksi. Pastikan Anda mentransfer nominal persis.', show_alert: true });
@@ -2403,16 +2419,19 @@ bot.on('callback_query', async (query) => {
       return bot.answerCallbackQuery(query.id, { text: 'Deposit tidak ditemukan.', show_alert: true });
     }
     if (dep.status === 'approved') {
+      try { await bot.deleteMessage(chatId, messageId); } catch(e) {}
       return bot.answerCallbackQuery(query.id, { text: 'Deposit sudah selesai dan tidak dapat dibatalkan.', show_alert: true });
     }
     if (dep.status === 'cancelled') {
+      try { await bot.deleteMessage(chatId, messageId); } catch(e) {}
       return bot.answerCallbackQuery(query.id, { text: 'Deposit sudah dibatalkan sebelumnya.', show_alert: true });
     }
 
     await dbRun("UPDATE deposits SET status = 'cancelled' WHERE id = ?", [dep.id]);
 
+    try { await bot.deleteMessage(chatId, messageId); } catch(e) {}
     bot.answerCallbackQuery(query.id, { text: '❌ Deposit berhasil dibatalkan.' });
-    return bot.sendMessage(chatId, `❌ <b>DEPOSIT DIBATALKAN</b>\n\nKode Deposit <code>#${depCode}</code> telah dibatalkan.`, { parse_mode: 'HTML' });
+    return bot.sendMessage(chatId, `❌ <b>DEPOSIT DIBATALKAN</b>\n\nDeposit <code>#${depCode}</code> telah berhasil dibatalkan.\nSilakan gunakan menu /start untuk melanjutkan transaksi.`, { parse_mode: 'HTML' });
   }
 
   // === OTP CALLBACKS ===
@@ -2842,7 +2861,10 @@ bot.on('callback_query', async (query) => {
       ]
     };
 
-    await sendQrPhotoOrMessage(chatId, payment, qrisMsg, qrisButtons);
+    const sentQr = await sendQrPhotoOrMessage(chatId, payment, qrisMsg, qrisButtons);
+    if (sentQr && sentQr.message_id) {
+      await dbRun('UPDATE payments SET message_id = ? WHERE order_id = ?', [sentQr.message_id, orderId]);
+    }
     return bot.answerCallbackQuery(query.id);
   }
 

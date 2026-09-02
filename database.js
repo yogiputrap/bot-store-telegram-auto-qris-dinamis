@@ -300,12 +300,14 @@ async function initDatabase() {
   await ensureColumn('payments', 'unique_code', 'INTEGER DEFAULT 0');
   await ensureColumn('payments', 'qr_image', 'TEXT');
   await ensureColumn('payments', 'expired_at', 'DATETIME');
+  await ensureColumn('payments', 'message_id', 'INTEGER');
   await ensureColumn('deposits', 'ref_id', 'TEXT');
   await ensureColumn('deposits', 'total_amount', 'INTEGER');
   await ensureColumn('deposits', 'unique_code', 'INTEGER DEFAULT 0');
   await ensureColumn('deposits', 'qr_image', 'TEXT');
   await ensureColumn('deposits', 'method', 'TEXT DEFAULT "AUTO_QRIS"');
   await ensureColumn('deposits', 'expired_at', 'DATETIME');
+  await ensureColumn('deposits', 'message_id', 'INTEGER');
   await ensureColumn('vouchers', 'min_spend', 'INTEGER DEFAULT 0');
   await ensureColumn('vouchers', 'max_usage', 'INTEGER DEFAULT 0');
   await ensureColumn('vouchers', 'used_count', 'INTEGER DEFAULT 0');
