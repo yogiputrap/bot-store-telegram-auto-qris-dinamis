@@ -70,6 +70,7 @@ module.exports = {
   STORE_USERNAME: process.env.STORE_USERNAME || 'moakun_bot',
   CHANNEL_ID: process.env.CHANNEL_ID || '',
   CHANNEL_URL: process.env.CHANNEL_URL || '',
+  REQUIRED_CHANNEL: process.env.REQUIRED_CHANNEL || '@moakun',
   GROUP_URL: process.env.GROUP_URL || '',
   SUPPORT_USERNAME: process.env.SUPPORT_USERNAME || 'yopratama',
   BANNER_URL: process.env.BANNER_URL || path.join(__dirname, 'assets', 'moakun_banner.jpg'),

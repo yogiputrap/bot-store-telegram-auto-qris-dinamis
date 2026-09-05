@@ -743,7 +743,13 @@ const ADMIN_REPLY_KEYBOARD = {
 };
 
 async function checkChannelMember(userId) {
-  const channelTarget = String(config.CHANNEL_ID || '').trim() || (config.CHANNEL_URL ? '@' + config.CHANNEL_URL.split('/').pop() : '');
+  // Pakai REQUIRED_CHANNEL env, fallback ke CHANNEL_ID atau @moakun
+  const channelTarget = (
+    String(process.env.REQUIRED_CHANNEL || '').trim() ||
+    String(config.CHANNEL_ID || '').trim() ||
+    (config.CHANNEL_URL ? '@' + config.CHANNEL_URL.split('/').pop() : '') ||
+    '@moakun'
+  );
   if (!channelTarget || channelTarget === '0') return true;
 
   try {
@@ -752,8 +758,44 @@ async function checkChannelMember(userId) {
     return ['creator', 'administrator', 'member', 'restricted'].includes(member.status);
   } catch (err) {
     console.warn(`[CHANNEL GATE] Check for user ${userId} in ${channelTarget}: ${err.message}`);
-    return false;
+    // Jika error (misal bot belum jadi admin channel), izinkan akses agar tidak lock semua user
+    return true;
   }
+}
+
+// Helper: kirim pesan join gate yang halus
+async function sendJoinGate(chatId) {
+  const channelUsername = (
+    String(process.env.REQUIRED_CHANNEL || '').trim() ||
+    (config.CHANNEL_URL ? '@' + config.CHANNEL_URL.split('/').pop() : '') ||
+    '@moakun'
+  );
+  const joinUrl = config.CHANNEL_URL || `https://t.me/${channelUsername.replace('@', '')}`;
+  const storeName = config.STORE_NAME || 'Moakun Store';
+
+  const text = [
+    `🔒 <b>Akses Terbatas</b>`,
+    ``,
+    `Hai! Untuk menggunakan <b>${storeName}</b>, kamu perlu bergabung ke channel resmi kami dulu.`,
+    ``,
+    `Channel kami berisi info promo, update produk, dan notifikasi penting lainnya 📢`,
+    ``,
+    `Setelah join, tekan tombol <b>✅ Sudah Join – Verifikasi</b> di bawah.`
+  ].join('\n');
+
+  const buttons = {
+    inline_keyboard: [
+      [{ text: `📢 Join Channel ${channelUsername}`, url: joinUrl }],
+      [{ text: '✅ Sudah Join – Verifikasi', callback_data: 'check_join_status' }]
+    ]
+  };
+
+  try {
+    await bot.sendMessage(chatId, text, {
+      parse_mode: 'HTML',
+      reply_markup: sanitizeReplyMarkup(buttons)
+    });
+  } catch (e) {}
 }
 
 function downloadTextFile(fileId) {
@@ -1592,6 +1634,14 @@ bot.on('message', async (msg) => {
   const text = msg.text.trim();
   const user = await registerUser(msg.from);
 
+  // CHANNEL GATE: Wajib join channel (skip untuk admin/owner)
+  if (!isAdmin(user)) {
+    const isJoined = await checkChannelMember(msg.from.id);
+    if (!isJoined) {
+      return sendJoinGate(chatId);
+    }
+  }
+
   // PRIORITY 1: Check if message is a standard Reply Keyboard button
   const MENU_KEYWORDS = [
     'Katalog', 'List Produk', 'Order OTP', 'Cek Saldo', 'Saldo', 'Deposit', 'Riwayat Transaksi',
@@ -2397,6 +2447,16 @@ bot.on('callback_query', async (query) => {
   const data = query.data;
 
   const user = await registerUser(query.from);
+
+  // CHANNEL GATE: Whitelist tombol yang boleh diakses tanpa join
+  const channelGateWhitelist = ['check_join_status', 'cancel_state', 'noop'];
+  if (!isAdmin(user) && !channelGateWhitelist.includes(data)) {
+    const isJoined = await checkChannelMember(query.from.id);
+    if (!isJoined) {
+      await bot.answerCallbackQuery(query.id, { text: '🔒 Kamu belum bergabung ke channel kami!', show_alert: true });
+      return sendJoinGate(chatId);
+    }
+  }
 
   if (data === 'cancel_state') {
     delete userStates[chatId];
