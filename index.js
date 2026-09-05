@@ -1601,7 +1601,7 @@ bot.on('message', async (msg) => {
     'Statistik & Export', 'Status CodeGatra', 'Broadcast'
   ];
 
-  const isMenuButtonClick = MENU_KEYWORDS.some(k => text.includes(k));
+  const isMenuButtonClick = MENU_KEYWORDS.some(k => text === k);
 
   if (isMenuButtonClick) {
     // Immediately clear conversational state so user is NEVER trapped when clicking menu buttons
