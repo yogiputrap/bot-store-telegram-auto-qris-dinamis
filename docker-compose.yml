@@ -10,21 +10,12 @@ services:
       - NODE_ENV=production
       - TZ=Asia/Jakarta
     volumes:
-      # Named volumes — dikelola Docker, tidak bergantung path Dokploy
-      # Data TIDAK akan hilang saat redeploy
-      - moakun_database:/app/database
-      - moakun_backups:/app/backups
+      # ../files adalah direktori persistent khusus Dokploy
+      # Data TIDAK akan hilang saat redeploy — tidak perlu setup manual
+      - ../files/database:/app/database
+      - ../files/backups:/app/backups
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
-
-# Deklarasi named volumes permanen (Docker simpan di /var/lib/docker/volumes/)
-volumes:
-  moakun_database:
-    name: moakun_database
-    external: true
-  moakun_backups:
-    name: moakun_backups
-    external: true
